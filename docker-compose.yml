@@ -1,0 +1,62 @@
+version: "3.7"
+services:
+  app:
+    build:
+      context: .
+    container_name: app
+    image: app:latest
+    command: ["web"]
+    env_file:
+      - .env
+    volumes:
+      - .:/usr/src/app
+    ports:
+      - ${BASE_PORT:-8000}:8000
+    depends_on: &deps
+      - postgres
+      - redis
+
+  listener:
+    build:
+      context: .
+    container_name: listener
+    image: listener:latest
+    command: [ "listener" ]
+    env_file:
+      - .env
+    volumes:
+      - .:/usr/src/app
+    depends_on: *deps
+
+  worker:
+    container_name: worker
+    image: app:latest
+    command: ["worker"]
+    env_file:
+      - .env
+    volumes:
+      - .:/usr/src/app
+    depends_on: *deps
+
+  postgres:
+    container_name: postgres
+    image: postgres:14.1-alpine
+    command: -p ${DATABASE_PORT:-5432}
+    environment:
+      - POSTGRES_DB=${DATABASE_NAME:-postgres}
+      - POSTGRES_USER=${DATABASE_USER:-postgres}
+      - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-postgres}
+    ports:
+      - ${DATABASE_PORT:-5432}:${DATABASE_PORT:-5432}
+    volumes:
+      - postgres:/var/lib/postgresql
+
+  redis:
+    container_name: redis
+    image: redis:5-alpine
+    command: --port ${REDIS_PORT:-6379}
+    ports:
+      - ${REDIS_PORT:-6379}:${REDIS_PORT:-6379}
+
+volumes:
+  postgres:
