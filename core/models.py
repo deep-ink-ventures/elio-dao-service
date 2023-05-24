@@ -12,6 +12,10 @@ class TimestampableMixin(models.Model):
         abstract = True
 
 
+class Contract(TimestampableMixin):
+    id = models.CharField(max_length=128, primary_key=True)
+
+
 class Account(TimestampableMixin):
     address = models.CharField(primary_key=True, max_length=128, unique=True, editable=False)
 
@@ -22,6 +26,7 @@ class Account(TimestampableMixin):
 
 class Dao(TimestampableMixin):
     id = models.CharField(max_length=128, primary_key=True)
+    contract = models.ForeignKey(Contract, on_delete=models.CASCADE)
     name = models.CharField(max_length=128, null=True)
     creator = models.ForeignKey(Account, related_name="created_daos", on_delete=models.SET_NULL, null=True)
     owner = models.ForeignKey(Account, related_name="owned_daos", on_delete=models.CASCADE)
@@ -106,10 +111,7 @@ class Vote(TimestampableMixin):
 
 
 class Block(TimestampableMixin):
-    hash = models.CharField(primary_key=True, max_length=128, unique=True, editable=False)
     number = models.BigIntegerField(unique=True, editable=False)
-    parent_hash = models.CharField(max_length=128, unique=True, editable=False, null=True)
-    extrinsic_data = models.JSONField(default=dict)
     event_data = models.JSONField(default=dict)
     executed = models.BooleanField(default=False, db_index=True)
 

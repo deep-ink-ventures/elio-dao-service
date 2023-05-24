@@ -61,6 +61,7 @@ class DaoSerializer(ModelSerializer):
         fields = (
             "id",
             "name",
+            "contract_id",
             "creator_id",
             "owner_id",
             "asset_id",

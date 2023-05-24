@@ -1,6 +1,8 @@
 import collections
 import logging
-from functools import reduce
+from functools import partial, reduce
+from itertools import chain
+from typing import DefaultDict
 
 from django.conf import settings
 from django.core.cache import cache
@@ -17,91 +19,77 @@ class ParseBlockException(Exception):
     pass
 
 
-class SubstrateEventHandler:
-    block_actions = None
+class SorobanEventHandler:
+    topics_to_action = None
 
     def __init__(self):
-        self.block_actions = (
-            self._create_accounts,
-            self._create_daos,
-            self._transfer_dao_ownerships,
-            self._delete_daos,
-            self._create_assets,
-            self._transfer_assets,
-            self._set_dao_metadata,
-            self._dao_set_governances,
-            self._create_proposals,
-            self._set_proposal_metadata,
-            self._register_votes,
-            self._finalize_proposals,
-            self._fault_proposals,
-        )
+        self.topics_to_action = {
+            ("DAO", "created"): self._create_daos,
+            ("DAO", "destroyed"): self._delete_daos,
+            ("DAO", "new_owner"): self._transfer_dao_ownerships,
+            ("DAO", "meta_set"): self._set_dao_metadata,
+        }
 
     @staticmethod
-    def _create_accounts(block: models.Block):
+    def _create_daos(event_data: dict[list[dict]]):
         """
         Args:
-            block: Block to create Accounts from
+            event_data: event input values by contract_id
 
         Returns:
             None
 
-        creates Accounts based on the Block's extrinsics and events
-        """
-        if accs := [
-            models.Account(address=dao_event["account"])
-            for dao_event in block.event_data.get("System", {}).get("NewAccount", [])
-        ]:
-            models.Account.objects.bulk_create(accs, ignore_conflicts=True)
-
-    @staticmethod
-    def _create_daos(block: models.Block):
-        """
-        Args:
-            block: Block to create Accounts from
-
-        Returns:
-            None
-
-        creates Daos based on the Block's extrinsics and events
+        creates Daos based on event data
         """
         daos = []
-        for dao_extrinsic in block.extrinsic_data.get("DaoCore", {}).get("create_dao", []):
-            for dao_event in block.event_data.get("DaoCore", {}).get("DaoCreated", []):
-                if dao_extrinsic["dao_id"] == dao_event["dao_id"]:
-                    daos.append(
-                        models.Dao(
-                            id=dao_extrinsic["dao_id"],
-                            name=dao_extrinsic["dao_name"],
-                            creator_id=dao_event["owner"],
-                            owner_id=dao_event["owner"],
-                        )
+        accs = set()
+        for contract_id, events in event_data.items():
+            for values in events:
+                accs.add(models.Account(address=values["owner"]))
+                daos.append(
+                    models.Dao(
+                        id=values["id"],
+                        name=values["name"],
+                        creator_id=values["owner"],
+                        owner_id=values["owner"],
+                        contract_id=contract_id,
                     )
-                    break
+                )
         if daos:
+            models.Account.objects.bulk_create(accs, ignore_conflicts=True)
             models.Dao.objects.bulk_create(daos)
 
     @staticmethod
-    def _transfer_dao_ownerships(block: models.Block):
+    def _delete_daos(event_data: dict[list[dict]]):
         """
         Args:
-            block: Block to change Dao owners from
+            event_data: event input values by contract_id
 
         Returns:
             None
 
-        transfers ownerships of a Daos to new Accounts based on the Block's events
+        deletes Daos based on event data
         """
-        dao_id_to_new_owner_id = {}  # {dao_id: new_owner_id}
-        for dao_event in block.event_data.get("DaoCore", {}).get("DaoOwnerChanged", []):
-            dao_id_to_new_owner_id[dao_event["dao_id"]] = dao_event["new_owner"]
+        if dao_ids := [values["dao_id"] for values in chain(*event_data.values())]:
+            models.Dao.objects.filter(id__in=dao_ids).delete()
 
+    @staticmethod
+    def _transfer_dao_ownerships(event_data: dict[list[dict]]):
+        """
+        Args:
+            event_data: event input values by contract_id
+
+        Returns:
+            None
+
+        transfers ownerships of a Daos to new Accounts based on event data
+        """
+        dao_id_to_new_owner_id = {values["id"]: values["owner"] for values in chain(*event_data.values())}
         for dao in (daos := list(models.Dao.objects.filter(id__in=dao_id_to_new_owner_id.keys()))):
             dao.owner_id = dao_id_to_new_owner_id[dao.id]
             dao.setup_complete = True
 
         if daos:
-            # try creating Accounts, needed for multi signature wallets
             models.Account.objects.bulk_create(
                 [models.Account(address=address) for address in dao_id_to_new_owner_id.values()],
                 ignore_conflicts=True,
@@ -109,20 +97,21 @@ class SubstrateEventHandler:
             models.Dao.objects.bulk_update(daos, ["owner_id", "setup_complete"])
 
     @staticmethod
-    def _delete_daos(block: models.Block):
+    def _set_dao_metadata(event_data: dict[list[dict]]):
         """
         Args:
-            block: Block to create Accounts from
+            event_data: event input values by contract_id
 
         Returns:
             None
 
-        deletes Daos based on the Block's extrinsics and events
+        updates Daos' metadata_url and metadata_hash based on event data
         """
-        if dao_ids := [
-            dao_event["dao_id"] for dao_event in block.event_data.get("DaoCore", {}).get("DaoDestroyed", [])
-        ]:
-            models.Dao.objects.filter(id__in=dao_ids).delete()
+        if dao_metadata := {
+            values["dao_id"]: {"metadata_url": values["url"], "metadata_hash": values["hash"]}
+            for values in chain(*event_data.values())
+        }:
+            tasks.update_dao_metadata.delay(dao_metadata=dao_metadata)
 
     @staticmethod
     def _create_assets(block: models.Block):
@@ -133,7 +122,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        creates Assets based on the Block's extrinsics and events
+        creates Assets based on event data
         """
 
         # create Assets and assign to Daos
@@ -176,7 +165,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        transfers Assets based on the Block's extrinsics and events
+        transfers Assets based on event data
         rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
         """
         asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
@@ -228,28 +217,6 @@ class SubstrateEventHandler:
             models.AssetHolding.objects.bulk_create(asset_holdings_to_create.values())
 
     @staticmethod
-    def _set_dao_metadata(block: models.Block):
-        """
-        Args:
-            block: Block to create Accounts from
-
-        Returns:
-            None
-
-        updates Daos' metadata_url and metadata_hash based on the Block's extrinsics and events
-        """
-        dao_metadata = {}  # {dao_id: {"metadata_url": metadata_url, "metadata_hash": metadata_hash}}
-        for dao_event in block.event_data.get("DaoCore", {}).get("DaoMetadataSet", []):
-            for dao_extrinsic in block.extrinsic_data.get("DaoCore", {}).get("set_metadata", []):
-                if (dao_id := dao_event["dao_id"]) == dao_extrinsic["dao_id"]:
-                    dao_metadata[dao_id] = {
-                        "metadata_url": dao_extrinsic["meta"],
-                        "metadata_hash": dao_extrinsic["hash"],
-                    }
-        if dao_metadata:
-            tasks.update_dao_metadata.delay(dao_metadata=dao_metadata)
-
-    @staticmethod
     def _dao_set_governances(block: models.Block):
         """
         Args:
@@ -258,7 +225,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        updates Daos' governance based on the Block's extrinsics and events
+        updates Daos' governance based on event data
         """
         governances = []
         dao_ids = set()
@@ -287,7 +254,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        create Proposals based on the Block's extrinsics and events
+        create Proposals based on event data
         """
         proposals = []
         dao_ids = set()
@@ -343,7 +310,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        set Proposals' metadata based on the Block's extrinsics and events
+        set Proposals' metadata based on event data
         """
         proposal_data = {}  # proposal_id: (metadata_hash, metadata_url)
         for proposal_created_event in block.event_data.get("Votes", {}).get("ProposalMetadataSet", []):
@@ -368,7 +335,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        registers Votes based on the Block's events
+        registers Votes based on the Block's event_data
         """
         proposal_ids_to_voting_data = collections.defaultdict(dict)  # {proposal_id: {voter_id: in_favor}}
         for voting_event in block.event_data.get("Votes", {}).get("VoteCast", []):
@@ -404,7 +371,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        finalizes Proposals based on the Block's events
+        finalizes Proposals based on the Block's event_data
         """
         votes_events = block.event_data.get("Votes", {})
         if accepted_proposal_ids := set(prop["proposal_id"] for prop in votes_events.get("ProposalAccepted", [])):
@@ -421,7 +388,7 @@ class SubstrateEventHandler:
         Returns:
             None
 
-        faults Proposals based on the Block's events
+        faults Proposals based on the Block's event_data
         """
         if faulted_proposals := {
             fault_event["proposal_id"]: fault_event["reason"]
@@ -441,23 +408,35 @@ class SubstrateEventHandler:
          Returns:
              None
 
-         alters db's blockchain representation based on the Block's extrinsics and events
+         alters db's blockchain representation based on the Block's event data
         """
-        for block_action in self.block_actions:
-            try:
-                block_action(block=block)
-            except IntegrityError:
-                msg = f"Database error while parsing Block #{block.number}."
-                logger.exception(msg)
-                raise ParseBlockException(msg)
-            except Exception:  # noqa E722
-                msg = f"Unexpected error while parsing Block #{block.number}."
-                logger.exception(msg)
-                raise ParseBlockException(msg)
+        error_base = f" during block execution. Block number: {block.number}."
+        # {topics: {contract_id: [event_data]}}
+        event_data_by_topics: DefaultDict = collections.defaultdict(partial(collections.defaultdict, list))
+        logger.info(f"Executing event_data... Block number: {block.number}")
+        for event in block.event_data:
+            contract_id, event_id, topics, vals = event
+            logger.info(f"Contract ID: {contract_id} | Event ID: {event_id} | Topics: {topics} | Values: {vals}")
+            event_data_by_topics[tuple(topics)][contract_id].append(vals)
+
+        for topics, events_by_contract_id in event_data_by_topics.items():
+            if not (action := self.topics_to_action.get(tuple(topics))):
+                logger.error(f"NotImplementedError {error_base} No action defined for topics: {topics}.")
+            else:
+                try:
+                    action(event_data=events_by_contract_id)
+                except IntegrityError:
+                    msg = "IntegrityError" + error_base
+                    logger.exception(msg)
+                    raise ParseBlockException(msg)
+                except Exception:  # noqa E722
+                    msg = "Unexpected error" + error_base
+                    logger.exception(msg)
+                    raise ParseBlockException(msg)
 
         block.executed = True
         block.save(update_fields=["executed"])
-        cache.set(key="current_block", value=(block.number, block.hash))
+        cache.set(key="current_block", value=block.number)
 
 
-substrate_event_handler = SubstrateEventHandler()
+soroban_event_handler = SorobanEventHandler()

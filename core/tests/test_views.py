@@ -21,6 +21,7 @@ def wrap_in_pagination_res(results: Collection) -> dict:
 
 expected_dao1_res = {
     "id": "dao1",
+    "contract_id": "contract1",
     "name": "dao1 name",
     "creator_id": "acc1",
     "owner_id": "acc1",
@@ -35,6 +36,7 @@ expected_dao1_res = {
 }
 expected_dao2_res = {
     "id": "dao2",
+    "contract_id": "contract2",
     "name": "dao2 name",
     "creator_id": "acc2",
     "owner_id": "acc2",
@@ -58,13 +60,24 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Account.objects.create(address="acc2")
         models.Account.objects.create(address="acc3")
         models.Account.objects.create(address="acc4")
+        models.Contract.objects.create(id="contract1")
+        models.Contract.objects.create(id="contract2")
+        models.Contract.objects.create(id="contract3")
+        models.Contract.objects.create(id="contract4")
         models.Dao.objects.create(
-            id="dao1", name="dao1 name", creator_id="acc1", owner_id="acc1", metadata={"some": "data"}
+            id="dao1",
+            contract_id="contract1",
+            name="dao1 name",
+            creator_id="acc1",
+            owner_id="acc1",
+            metadata={"some": "data"},
         )
         models.Governance.objects.create(
             dao_id="dao1", proposal_duration=10, proposal_token_deposit=123, minimum_majority=50
         )
-        models.Dao.objects.create(id="dao2", name="dao2 name", creator_id="acc2", owner_id="acc2")
+        models.Dao.objects.create(
+            id="dao2", contract_id="contract2", name="dao2 name", creator_id="acc2", owner_id="acc2"
+        )
         models.Governance.objects.create(
             dao_id="dao2", proposal_duration=15, proposal_token_deposit=234, minimum_majority=45
         )
@@ -200,6 +213,7 @@ class CoreViewSetTest(IntegrationTestCase):
                 expected_dao2_res,
                 {
                     "id": "dao3",
+                    "contract_id": "contract3",
                     "name": "3",
                     "creator_id": "acc1",
                     "owner_id": "acc2",
@@ -219,6 +233,7 @@ class CoreViewSetTest(IntegrationTestCase):
             [
                 {
                     "id": "dao3",
+                    "contract_id": "contract3",
                     "name": "3",
                     "creator_id": "acc1",
                     "owner_id": "acc2",
@@ -242,6 +257,7 @@ class CoreViewSetTest(IntegrationTestCase):
                 expected_dao2_res,
                 {
                     "id": "dao3",
+                    "contract_id": "contract3",
                     "name": "3",
                     "creator_id": "acc1",
                     "owner_id": "acc2",
@@ -259,7 +275,9 @@ class CoreViewSetTest(IntegrationTestCase):
     )
     def test_dao_list_order_by(self, case):
         query_params, expected_res = case
-        models.Dao.objects.create(id="dao3", name="3", creator_id="acc1", owner_id="acc2", setup_complete=True)
+        models.Dao.objects.create(
+            id="dao3", contract_id="contract3", name="3", creator_id="acc1", owner_id="acc2", setup_complete=True
+        )
 
         expected_res = wrap_in_pagination_res(expected_res)
 
@@ -275,6 +293,7 @@ class CoreViewSetTest(IntegrationTestCase):
             [
                 {
                     "id": "dao4",
+                    "contract_id": "contract4",
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
@@ -290,6 +309,7 @@ class CoreViewSetTest(IntegrationTestCase):
                 expected_dao2_res,
                 {
                     "id": "dao3",
+                    "contract_id": "contract3",
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
@@ -311,6 +331,7 @@ class CoreViewSetTest(IntegrationTestCase):
             [
                 {
                     "id": "dao4",
+                    "contract_id": "contract4",
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
@@ -325,6 +346,7 @@ class CoreViewSetTest(IntegrationTestCase):
                 },
                 {
                     "id": "dao3",
+                    "contract_id": "contract3",
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
@@ -348,6 +370,7 @@ class CoreViewSetTest(IntegrationTestCase):
                 expected_dao2_res,
                 {
                     "id": "dao4",
+                    "contract_id": "contract4",
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
@@ -363,6 +386,7 @@ class CoreViewSetTest(IntegrationTestCase):
                 expected_dao1_res,
                 {
                     "id": "dao3",
+                    "contract_id": "contract3",
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
@@ -381,8 +405,12 @@ class CoreViewSetTest(IntegrationTestCase):
     )
     def test_dao_list_prioritised(self, case):
         query_params, expected_res, expected_query_count = case
-        models.Dao.objects.create(id="dao3", name="dao3 name", creator_id="acc1", owner_id="acc1")
-        models.Dao.objects.create(id="dao4", name="dao4 name", creator_id="acc2", owner_id="acc2")
+        models.Dao.objects.create(
+            id="dao3", contract_id="contract3", name="dao3 name", creator_id="acc1", owner_id="acc1"
+        )
+        models.Dao.objects.create(
+            id="dao4", contract_id="contract4", name="dao4 name", creator_id="acc2", owner_id="acc2"
+        )
         models.Asset.objects.create(id=3, owner_id="acc1", dao_id="dao3", total_supply=100)
         models.Asset.objects.create(id=4, owner_id="acc2", dao_id="dao4", total_supply=200)
         models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=100)
@@ -415,7 +443,7 @@ class CoreViewSetTest(IntegrationTestCase):
         cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
         signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
         acc = models.Account.objects.create(address=keypair.ss58_address)
-        models.Dao.objects.create(id="DAO1", name="dao1 name", owner=acc)
+        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
 
         with open("core/tests/test_file.jpeg", "rb") as f:
             post_data = {
@@ -457,7 +485,7 @@ class CoreViewSetTest(IntegrationTestCase):
         cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
         signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
         acc = models.Account.objects.create(address=keypair.ss58_address)
-        models.Dao.objects.create(id="DAO1", name="dao1 name", owner=acc)
+        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
 
         post_data = {
             "email": "some@email.com",
@@ -489,7 +517,7 @@ class CoreViewSetTest(IntegrationTestCase):
         cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
         signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
         acc = models.Account.objects.create(address=keypair.ss58_address)
-        models.Dao.objects.create(id="DAO1", name="dao1 name", owner=acc)
+        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
 
         with open("core/tests/test_file_5mb.jpeg", "rb") as f:
             post_data = {
