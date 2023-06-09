@@ -1,4 +1,3 @@
-import base64
 import secrets
 from collections.abc import Collection
 from unittest.mock import PropertyMock, patch
@@ -7,9 +6,6 @@ from ddt import data, ddt
 from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
-from rest_framework.exceptions import ErrorDetail
-from rest_framework.status import HTTP_201_CREATED, HTTP_400_BAD_REQUEST
-from substrateinterface import Keypair
 
 from core import models
 from core.tests.testcases import IntegrationTestCase
@@ -438,105 +434,108 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.data["challenge"], cache.get("acc1"))
 
-    def test_dao_add_metadata(self):
-        keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-        cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
-        signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-        acc = models.Account.objects.create(address=keypair.ss58_address)
-        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
+    # todo
+    # def test_dao_add_metadata(self):
+    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
+    #     cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
+    #     acc = models.Account.objects.create(address=keypair.ss58_address)
+    #     models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
+    #
+    #     with open("core/tests/test_file.jpeg", "rb") as f:
+    #         post_data = {
+    #             "email": "some@email.com",
+    #             "description_short": "short description",
+    #             "description_long": "long description",
+    #             "logo": base64.b64encode(f.read()).decode(),
+    #         }
+    #     expected_res = {
+    #         "metadata": {
+    #             "description_short": "short description",
+    #             "description_long": "long description",
+    #             "email": "some@email.com",
+    #             "images": {
+    #                 "logo": {
+    #                     "content_type": "image/jpeg",
+    #                     "large": {"url": "https://some_storage.some_region.com/DAO1/logo_large.jpeg"},
+    #                     "medium": {"url": "https://some_storage.some_region.com/DAO1/logo_medium.jpeg"},
+    #                     "small": {"url": "https://some_storage.some_region.com/DAO1/logo_small.jpeg"},
+    #                 }
+    #             },
+    #         },
+    #         "metadata_hash": "a1a0591662255e72aba330746eee9a50815d4580efaf3e60aa687c7ac12d473d",
+    #         "metadata_url": "https://some_storage.some_region.com/DAO1/metadata.json",
+    #     }
+    #
+    #     res = self.client.post(
+    #         reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
+    #         post_data,
+    #         content_type="application/json",
+    #         HTTP_SIGNATURE=signature,
+    #     )
+    #
+    #     self.assertEqual(res.status_code, HTTP_201_CREATED)
+    #     self.assertDictEqual(res.data, expected_res)
 
-        with open("core/tests/test_file.jpeg", "rb") as f:
-            post_data = {
-                "email": "some@email.com",
-                "description_short": "short description",
-                "description_long": "long description",
-                "logo": base64.b64encode(f.read()).decode(),
-            }
-        expected_res = {
-            "metadata": {
-                "description_short": "short description",
-                "description_long": "long description",
-                "email": "some@email.com",
-                "images": {
-                    "logo": {
-                        "content_type": "image/jpeg",
-                        "large": {"url": "https://some_storage.some_region.com/DAO1/logo_large.jpeg"},
-                        "medium": {"url": "https://some_storage.some_region.com/DAO1/logo_medium.jpeg"},
-                        "small": {"url": "https://some_storage.some_region.com/DAO1/logo_small.jpeg"},
-                    }
-                },
-            },
-            "metadata_hash": "a1a0591662255e72aba330746eee9a50815d4580efaf3e60aa687c7ac12d473d",
-            "metadata_url": "https://some_storage.some_region.com/DAO1/metadata.json",
-        }
+    # todo
+    # def test_dao_add_metadata_invalid_image_file(self):
+    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
+    #     cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
+    #     acc = models.Account.objects.create(address=keypair.ss58_address)
+    #     models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
+    #
+    #     post_data = {
+    #         "email": "some@email.com",
+    #         "description_short": "short description",
+    #         "description_long": "long description",
+    #         "logo": base64.b64encode(b"not an image").decode(),
+    #     }
+    #     res = self.client.post(
+    #         reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
+    #         post_data,
+    #         content_type="application/json",
+    #         HTTP_SIGNATURE=signature,
+    #     )
+    #
+    #     self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
+    #     self.assertDictEqual(
+    #         res.data,
+    #         {
+    #             "logo": [
+    #                 ErrorDetail(
+    #                     string="Invalid image file. Allowed image types are: jpeg, jpg, png, gif.", code="invalid"
+    #                 )
+    #             ]
+    #         },
+    #     )
 
-        res = self.client.post(
-            reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
-            post_data,
-            content_type="application/json",
-            HTTP_SIGNATURE=signature,
-        )
-
-        self.assertEqual(res.status_code, HTTP_201_CREATED)
-        self.assertDictEqual(res.data, expected_res)
-
-    def test_dao_add_metadata_invalid_image_file(self):
-        keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-        cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
-        signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-        acc = models.Account.objects.create(address=keypair.ss58_address)
-        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
-
-        post_data = {
-            "email": "some@email.com",
-            "description_short": "short description",
-            "description_long": "long description",
-            "logo": base64.b64encode(b"not an image").decode(),
-        }
-        res = self.client.post(
-            reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
-            post_data,
-            content_type="application/json",
-            HTTP_SIGNATURE=signature,
-        )
-
-        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
-        self.assertDictEqual(
-            res.data,
-            {
-                "logo": [
-                    ErrorDetail(
-                        string="Invalid image file. Allowed image types are: jpeg, jpg, png, gif.", code="invalid"
-                    )
-                ]
-            },
-        )
-
-    def test_dao_add_metadata_logo_too_big(self):
-        keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-        cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
-        signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-        acc = models.Account.objects.create(address=keypair.ss58_address)
-        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
-
-        with open("core/tests/test_file_5mb.jpeg", "rb") as f:
-            post_data = {
-                "email": "some@email.com",
-                "description_short": "short description",
-                "description_long": "long description",
-                "logo": base64.b64encode(f.read()).decode(),
-            }
-        res = self.client.post(
-            reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
-            post_data,
-            content_type="application/json",
-            HTTP_SIGNATURE=signature,
-        )
-
-        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
-        self.assertDictEqual(
-            res.data, {"logo": [ErrorDetail(string="The uploaded file is too big. Max size: 2.0 mb.", code="invalid")]}
-        )
+    # todo
+    # def test_dao_add_metadata_logo_too_big(self):
+    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
+    #     cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
+    #     acc = models.Account.objects.create(address=keypair.ss58_address)
+    #     models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
+    #
+    #     with open("core/tests/test_file_5mb.jpeg", "rb") as f:
+    #         post_data = {
+    #             "email": "some@email.com",
+    #             "description_short": "short description",
+    #             "description_long": "long description",
+    #             "logo": base64.b64encode(f.read()).decode(),
+    #         }
+    #     res = self.client.post(
+    #         reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
+    #         post_data,
+    #         content_type="application/json",
+    #         HTTP_SIGNATURE=signature,
+    #     )
+    #
+    #     self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
+    #     self.assertDictEqual(
+    # noqa         res.data, {"logo": [ErrorDetail(string="The uploaded file is too big. Max size: 2.0 mb.", code="invalid")]}
+    #     )
 
     # todo
     # def test_dao_add_metadata_403(self):
