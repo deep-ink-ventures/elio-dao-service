@@ -10,9 +10,7 @@ import os
 import sys
 from pathlib import Path
 
-from stellar_sdk.soroban import SorobanServer
 from corsheaders.defaults import default_headers
-
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -192,7 +190,7 @@ LOGO_SIZES = {
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # soroban
-SOROBAN_SERVER = SorobanServer
+SOROBAN_START_LEDGER = 311_081
 BLOCKCHAIN_URL = os.environ.get("BLOCKCHAIN_URL")
 BLOCK_CREATION_INTERVAL = int(os.environ.get("BLOCK_CREATION_INTERVAL", 5))  # seconds
 RETRY_DELAYS = [int(_) for _ in os.environ.get("RETRY_DELAYS", "5,10,30,60,120").split(",")]

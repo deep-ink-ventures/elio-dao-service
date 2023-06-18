@@ -53,7 +53,7 @@ class Governance(TimestampableMixin):
 
 
 class Asset(TimestampableMixin):
-    id = models.PositiveBigIntegerField(primary_key=True)
+    id = models.CharField(max_length=128, primary_key=True)
     total_supply = utils.BiggerIntField()
     dao = models.OneToOneField(Dao, related_name="asset", on_delete=models.CASCADE)
     owner = models.ForeignKey(Account, related_name="assets", on_delete=models.CASCADE)

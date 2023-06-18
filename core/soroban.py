@@ -17,18 +17,30 @@ from core.event_handler import soroban_event_handler
 logger = getLogger("alerts")
 
 
+# todo replace this
 def unpack_scval(val: SCVal):
-    if val.type == SCValType.SCV_MAP:
-        return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
-    if val.type == SCValType.SCV_SYMBOL:
-        return val.sym.sc_symbol.decode().strip()
-    if val.type == SCValType.SCV_BYTES:
-        return val.bytes.sc_bytes.decode().strip()
-    if val.type == SCValType.SCV_ADDRESS:
-        if val.address.type == SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
-            if val.address.account_id.account_id.type == PublicKeyType.PUBLIC_KEY_TYPE_ED25519:
-                return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
-    raise Exception(f"unhandled SCVal type: {val.type}")
+    match val.type:
+        case SCValType.SCV_MAP:
+            return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
+        case SCValType.SCV_SYMBOL:
+            return val.sym.sc_symbol.decode().strip()
+        case SCValType.SCV_BYTES:
+            try:
+                return val.bytes.sc_bytes.decode().strip()
+            except UnicodeDecodeError:
+                return StrKey.encode_ed25519_public_key(val.bytes.sc_bytes)
+        case SCValType.SCV_ADDRESS:
+            match val.address.type:
+                case SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
+                    match val.address.account_id.account_id.type:
+                        case PublicKeyType.PUBLIC_KEY_TYPE_ED25519:
+                            return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
+                case SCAddressType.SC_ADDRESS_TYPE_CONTRACT:
+                    return StrKey.encode_ed25519_public_key(val.address.contract_id.hash)
+        case SCValType.SCV_VEC:
+            return [unpack_scval(entry) for entry in val.vec.sc_vec]
+        case _:
+            return str(val)
 
 
 def retry(description: str):
@@ -140,6 +152,45 @@ class SorobanService(object):
         if start_time:
             self.sleep(start_time=start_time)
 
+    def find_start_ledger(self):
+        """
+        searches for the oldest ledger idx starting from envvar SOROBAN_START_LEDGER
+
+        Returns:
+            oldest ledger idx
+        """
+
+        def check(start_ledger):
+            try:
+                self.soroban.get_events(start_ledger=start_ledger)
+            except RequestException as exc:
+                match exc.message:
+                    case "start is before oldest ledger":
+                        return "<"
+                    case "start is after newest ledger":
+                        return ">"
+                    case _:
+                        raise
+
+        idx = settings.SOROBAN_START_LEDGER
+        while check(idx) == "<":  # find upper bound
+            idx *= 2
+        lower_bound = 0
+        higher_bound = idx + 1  # upper bound has to be exclusive
+
+        while True:  # binary search to find smallest start_ledger
+            idx = (lower_bound + higher_bound) // 2
+            match check(idx):
+                case ">":
+                    higher_bound = idx
+                case "<":
+                    lower_bound = idx
+                case _:  # check if previous start_ledger exists
+                    logger.info(f"Searching for start_ledger... {idx}")
+                    if check(idx - 1) == "<":
+                        return idx
+                    higher_bound = idx
+
     def fetch_and_parse_block(self, start_ledger: int) -> Tuple[int, int]:
         """
         Args:
@@ -154,12 +205,7 @@ class SorobanService(object):
         try:
             res = self.soroban.get_events(start_ledger=start_ledger, limit=10000)
         except RequestException as ex:
-            msg = "RequestException while fetching event_data: "
             match ex.message:
-                case "start is before oldest ledger":
-                    start_ledger += 1
-                    logger.info(f"{msg}'{ex.message}'. Retrying with bigger start ledger: {start_ledger}...")
-                    return self.fetch_and_parse_block(start_ledger=start_ledger)
                 case "start is after newest ledger":
                     self.clear_db()
                     return 0, 0
@@ -190,8 +236,10 @@ class SorobanService(object):
         return max(events_per_block.keys()) if events_per_block else start_ledger - 1, res.latest_ledger
 
     def listen(self):
+        for block in core_models.Block.objects.filter(executed=False).order_by("number"):
+            soroban_event_handler.execute_actions(block=block)
         latest_block = core_models.Block.objects.order_by("-number").first()
-        latest_block_number = (latest_block and latest_block.number) or 0
+        latest_block_number = (latest_block and latest_block.number) or self.find_start_ledger()
 
         while True:
             start_time = time.time()

@@ -28,6 +28,7 @@ class SorobanEventHandler:
             ("DAO", "destroyed"): self._delete_daos,
             ("DAO", "new_owner"): self._transfer_dao_ownerships,
             ("DAO", "meta_set"): self._set_dao_metadata,
+            ("ASSET", "created"): self._create_assets,
         }
 
     @staticmethod
@@ -45,13 +46,13 @@ class SorobanEventHandler:
         accs = set()
         for contract_id, events in event_data.items():
             for values in events:
-                accs.add(models.Account(address=values["owner"]))
+                accs.add(models.Account(address=values["owner_id"]))
                 daos.append(
                     models.Dao(
-                        id=values["id"],
-                        name=values["name"],
-                        creator_id=values["owner"],
-                        owner_id=values["owner"],
+                        id=values["dao_id"],
+                        name=values["dao_name"],
+                        creator_id=values["owner_id"],
+                        owner_id=values["owner_id"],
                         contract_id=contract_id,
                     )
                 )
@@ -84,7 +85,7 @@ class SorobanEventHandler:
 
         transfers ownerships of a Daos to new Accounts based on event data
         """
-        dao_id_to_new_owner_id = {values["id"]: values["owner"] for values in chain(*event_data.values())}
+        dao_id_to_new_owner_id = {values["dao_id"]: values["new_owner_id"] for values in chain(*event_data.values())}
         for dao in (daos := list(models.Dao.objects.filter(id__in=dao_id_to_new_owner_id.keys()))):
             dao.owner_id = dao_id_to_new_owner_id[dao.id]
             dao.setup_complete = True
@@ -114,107 +115,90 @@ class SorobanEventHandler:
             tasks.update_dao_metadata.delay(dao_metadata=dao_metadata)
 
     @staticmethod
-    def _create_assets(block: models.Block):
+    def _create_assets(event_data: dict[list[dict]]):
         """
         Args:
-            block: Block to create Accounts from
+            event_data: event input values by contract_id
 
         Returns:
             None
 
         creates Assets based on event data
         """
-
         # create Assets and assign to Daos
         assets = []
         asset_holdings = []
-        for asset_issued_event in block.event_data.get("Assets", {}).get("Issued", []):
-            for asset_metadata in block.event_data.get("Assets", {}).get("MetadataSet", []):
-                if asset_issued_event["asset_id"] == asset_metadata["asset_id"]:
-                    asset_id, owner_id, balance = (
-                        asset_metadata["asset_id"],
-                        asset_issued_event["owner"],
-                        asset_issued_event["total_supply"],
-                    )
-                    assets.append(
-                        models.Asset(
-                            id=asset_id,
-                            dao_id=asset_metadata["symbol"],
-                            owner_id=owner_id,
-                            total_supply=balance,
-                        )
-                    )
-                    asset_holdings.append(
-                        models.AssetHolding(
-                            asset_id=asset_id,
-                            owner_id=owner_id,
-                            balance=balance,
-                        )
-                    )
+        # todo initial_supply + balance
+        for values in chain(*event_data.values()):
+            asset_id, owner_id, dao_id = values["asset_id"], values["owner_id"], values["dao_id"]
+            assets.append(models.Asset(id=asset_id, dao_id=dao_id, owner_id=owner_id, total_supply=0))
+            asset_holdings.append(models.AssetHolding(asset_id=asset_id, owner_id=owner_id, balance=0))
         if assets:
             for asset_holding_obj, asset in zip(asset_holdings, models.Asset.objects.bulk_create(assets)):
                 asset_holding_obj.asset_id = asset.id
             models.AssetHolding.objects.bulk_create(asset_holdings)
 
     @staticmethod
-    def _transfer_assets(block: models.Block):
-        """
-        Args:
-            block: Block to create Accounts from
-
-        Returns:
-            None
-
-        transfers Assets based on event data
-        rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
-        """
-        asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
-        asset_ids_to_owner_ids = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
-        for asset_issued_event in block.event_data.get("Assets", {}).get("Transferred", []):
-            asset_id, amount = asset_issued_event["asset_id"], asset_issued_event["amount"]
-            from_acc, to_acc = asset_issued_event["from"], asset_issued_event["to"]
-            asset_holding_data.append((asset_id, amount, from_acc, to_acc))
-            asset_ids_to_owner_ids[asset_id].add(from_acc)
-            asset_ids_to_owner_ids[asset_id].add(to_acc)
-
-        if asset_holding_data:
-            existing_holdings = collections.defaultdict(dict)
-            for asset_holding in models.AssetHolding.objects.filter(
-                # WHERE (
-                #     (asset_holding.asset_id = 1 AND asset_holding.owner_id IN (1, 2))
-                #     OR (asset_holding.asset_id = 2 AND asset_holding.owner_id IN (3, 4))
-                #     OR ...
-                # )
-                reduce(
-                    Q.__or__,
-                    [
-                        Q(asset_id=asset_id, owner_id__in=owner_ids)
-                        for asset_id, owner_ids in asset_ids_to_owner_ids.items()
-                    ],
-                )
-            ):
-                existing_holdings[asset_holding.asset_id][asset_holding.owner_id] = asset_holding
-
-            asset_holdings_to_create = {}
-            for asset_id, amount, from_acc, to_acc in asset_holding_data:
-                # subtract transferred amount from existing models.AssetHolding
-                existing_holdings[asset_id][from_acc].balance -= amount
-
-                #  add transferred amount if models.AssetHolding already exists
-                if to_acc_holding := asset_holdings_to_create.get((asset_id, to_acc)):
-                    to_acc_holding.balance += amount
-                elif to_acc_holding := existing_holdings.get(asset_id, {}).get(to_acc):
-                    to_acc_holding.balance += amount
-                # otherwise create a new models.AssetHolding with balance = transferred amount
-                else:
-                    asset_holdings_to_create[(asset_id, to_acc)] = models.AssetHolding(
-                        owner_id=to_acc, asset_id=asset_id, balance=amount
-                    )
-            models.AssetHolding.objects.bulk_update(
-                [holding for acc_to_holding in existing_holdings.values() for holding in acc_to_holding.values()],
-                ["balance"],
-            )
-            models.AssetHolding.objects.bulk_create(asset_holdings_to_create.values())
+    def _transfer_assets(event_data: dict[list[dict]]):
+        pass
+        # todo
+        # """
+        # Args:
+        #     event_data: event input values by contract_id
+        #
+        # Returns:
+        #     None
+        #
+        # transfers Assets based on event data
+        # rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
+        # """
+        # asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
+        # asset_ids_to_owner_ids = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
+        # for asset_issued_event in block.event_data.get("Assets", {}).get("Transferred", []):
+        #     asset_id, amount = asset_issued_event["asset_id"], asset_issued_event["amount"]
+        #     from_acc, to_acc = asset_issued_event["from"], asset_issued_event["to"]
+        #     asset_holding_data.append((asset_id, amount, from_acc, to_acc))
+        #     asset_ids_to_owner_ids[asset_id].add(from_acc)
+        #     asset_ids_to_owner_ids[asset_id].add(to_acc)
+        #
+        # if asset_holding_data:
+        #     existing_holdings = collections.defaultdict(dict)
+        #     for asset_holding in models.AssetHolding.objects.filter(
+        #         # WHERE (
+        #         #     (asset_holding.asset_id = 1 AND asset_holding.owner_id IN (1, 2))
+        #         #     OR (asset_holding.asset_id = 2 AND asset_holding.owner_id IN (3, 4))
+        #         #     OR ...
+        #         # )
+        #         reduce(
+        #             Q.__or__,
+        #             [
+        #                 Q(asset_id=asset_id, owner_id__in=owner_ids)
+        #                 for asset_id, owner_ids in asset_ids_to_owner_ids.items()
+        #             ],
+        #         )
+        #     ):
+        #         existing_holdings[asset_holding.asset_id][asset_holding.owner_id] = asset_holding
+        #
+        #     asset_holdings_to_create = {}
+        #     for asset_id, amount, from_acc, to_acc in asset_holding_data:
+        #         # subtract transferred amount from existing models.AssetHolding
+        #         existing_holdings[asset_id][from_acc].balance -= amount
+        #
+        #         #  add transferred amount if models.AssetHolding already exists
+        #         if to_acc_holding := asset_holdings_to_create.get((asset_id, to_acc)):
+        #             to_acc_holding.balance += amount
+        #         elif to_acc_holding := existing_holdings.get(asset_id, {}).get(to_acc):
+        #             to_acc_holding.balance += amount
+        #         # otherwise create a new models.AssetHolding with balance = transferred amount
+        #         else:
+        #             asset_holdings_to_create[(asset_id, to_acc)] = models.AssetHolding(
+        #                 owner_id=to_acc, asset_id=asset_id, balance=amount
+        #             )
+        #     models.AssetHolding.objects.bulk_update(
+        #         [holding for acc_to_holding in existing_holdings.values() for holding in acc_to_holding.values()],
+        #         ["balance"],
+        #     )
+        #     models.AssetHolding.objects.bulk_create(asset_holdings_to_create.values())
 
     @staticmethod
     def _dao_set_governances(block: models.Block):
@@ -417,11 +401,15 @@ class SorobanEventHandler:
         for event in block.event_data:
             contract_id, event_id, topics, vals = event
             logger.info(f"Contract ID: {contract_id} | Event ID: {event_id} | Topics: {topics} | Values: {vals}")
-            event_data_by_topics[tuple(topics)][contract_id].append(vals)
+            formatted_topics = tuple(tuple(topic) if isinstance(topic, list) else topic for topic in topics)
+            event_data_by_topics[formatted_topics][contract_id].append(vals)
 
         for topics, events_by_contract_id in event_data_by_topics.items():
-            if not (action := self.topics_to_action.get(tuple(topics))):
-                logger.error(f"NotImplementedError {error_base} No action defined for topics: {topics}.")
+            try:
+                topics = topics[0], topics[1]
+                action = self.topics_to_action[topics]
+            except Exception:  # noqa E722
+                logger.error(f"NotImplementedError{error_base} No action defined for topics: {topics}.")
             else:
                 try:
                     action(event_data=events_by_contract_id)

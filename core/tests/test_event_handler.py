@@ -35,10 +35,10 @@ class EventHandlerTest(IntegrationTestCase):
         models.Contract.objects.create(id="contract4")
         event_data = {
             "contract3": [
-                {"owner": "acc2", "id": "dao3", "name": "dao3 name", "not": "interesting"},
+                {"owner_id": "acc2", "dao_id": "dao3", "dao_name": "dao3 name", "not": "interesting"},
             ],
             "contract4": [
-                {"owner": "acc3", "id": "dao4", "name": "dao4 name", "not": "interesting"},
+                {"owner_id": "acc3", "dao_id": "dao4", "dao_name": "dao4 name", "not": "interesting"},
             ],
         }
         expected_accs = [self.acc1, self.acc2, models.Account(address="acc3")]
@@ -67,13 +67,13 @@ class EventHandlerTest(IntegrationTestCase):
         ),
         event_data = {
             "contract1": [
-                {"id": "dao1", "owner": "acc3", "not": "interesting"},
+                {"dao_id": "dao1", "new_owner_id": "acc3", "not": "interesting"},
             ],
             "contract2": [
-                {"id": "dao2", "owner": "acc1", "not": "interesting"},
+                {"dao_id": "dao2", "new_owner_id": "acc1", "not": "interesting"},
             ],
             "contract3": [
-                {"id": "dao3", "owner": "acc4", "not": "interesting"},
+                {"dao_id": "dao3", "new_owner_id": "acc4", "not": "interesting"},
             ],
         }
         expected_accounts = [self.acc1, self.acc2, models.Account(address="acc3"), models.Account(address="acc4")]
@@ -128,44 +128,31 @@ class EventHandlerTest(IntegrationTestCase):
 
         self.assertModelsEqual(models.Dao.objects.all(), expected_daos)
 
-    # todo
-    # def test__create_assets(self):
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner=models.Account.objects.create(address="acc1"))
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner=models.Account.objects.create(address="acc2"))
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         event_data={
-    #             "not": "interesting",
-    #             "Assets": {
-    #                 "not": "interesting",
-    #                 "Issued": [
-    #                     {"asset_id": 1, "total_supply": 100, "owner": "acc1", "not": "interesting"},
-    #                     {"asset_id": 2, "total_supply": 200, "owner": "acc2", "not": "interesting"},
-    #                 ],
-    #                 "MetadataSet": [
-    #                     {"name": "dao1 name", "symbol": "dao1", "asset_id": 1, "not": "interesting"},
-    #                     {"name": "dao2 name", "symbol": "dao2", "asset_id": 2, "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_assets = [
-    #         models.Asset(id=1, total_supply=100, owner_id="acc1", dao_id="dao1"),
-    #         models.Asset(id=2, total_supply=200, owner_id="acc2", dao_id="dao2"),
-    #     ]
-    #     expected_asset_holdings = [
-    #         models.AssetHolding(asset_id=1, owner_id="acc1", balance=100),
-    #         models.AssetHolding(asset_id=2, owner_id="acc2", balance=200),
-    #     ]
-    #
-    #     with self.assertNumQueries(2):
-    #         soroban_event_handler._create_assets(block)
-    #
-    #     self.assertModelsEqual(models.Asset.objects.all(), expected_assets)
-    #     self.assertModelsEqual(
-    # noqa       models.AssetHolding.objects.all(), expected_asset_holdings, ignore_fields=("id", "created_at", "updated_at")
-    #     )
+    def test__create_assets(self):
+        event_data = {
+            "contract1": [
+                {"dao_id": "dao1", "owner_id": "acc1", "asset_id": "a1", "not": "interesting"},
+            ],
+            "contract2": [
+                {"dao_id": "dao2", "owner_id": "acc2", "asset_id": "a2", "not": "interesting"},
+            ],
+        }
+        expected_assets = [
+            models.Asset(id="a1", total_supply=0, owner_id="acc1", dao_id="dao1"),
+            models.Asset(id="a2", total_supply=0, owner_id="acc2", dao_id="dao2"),
+        ]
+        expected_asset_holdings = [
+            models.AssetHolding(asset_id="a1", owner_id="acc1", balance=0),
+            models.AssetHolding(asset_id="a2", owner_id="acc2", balance=0),
+        ]
+
+        with self.assertNumQueries(2):
+            soroban_event_handler._create_assets(event_data=event_data)
+
+        self.assertModelsEqual(models.Asset.objects.all(), expected_assets)
+        self.assertModelsEqual(
+            models.AssetHolding.objects.all(), expected_asset_holdings, ignore_fields=("id", "created_at", "updated_at")
+        )
 
     # todo
     # def test__transfer_assets(self):
@@ -1134,8 +1121,8 @@ class EventHandlerTest(IntegrationTestCase):
     @patch("core.event_handler.SorobanEventHandler._transfer_dao_ownerships")
     @patch("core.event_handler.SorobanEventHandler._delete_daos")
     @patch("core.event_handler.SorobanEventHandler._set_dao_metadata")
+    @patch("core.event_handler.SorobanEventHandler._create_assets")
     @patch("core.event_handler.logger")
-    # @patch("core.event_handler.SorobanEventHandler._create_assets")
     # @patch("core.event_handler.SorobanEventHandler._transfer_assets")
     # @patch("core.event_handler.SorobanEventHandler._dao_set_governances")
     # @patch("core.event_handler.SorobanEventHandler._create_proposals")
@@ -1148,11 +1135,13 @@ class EventHandlerTest(IntegrationTestCase):
         ([["c1", "e1", ["DAO", "destroyed"], {"d": 1}]], [("_delete_daos", {"c1": [{"d": 1}]})]),
         ([["c1", "e1", ["DAO", "new_owner"], {"d": 1}]], [("_transfer_dao_ownerships", {"c1": [{"d": 1}]})]),
         ([["c1", "e1", ["DAO", "meta_set"], {"d": 1}]], [("_set_dao_metadata", {"c1": [{"d": 1}]})]),
+        ([["c1", "e1", ["ASSET", "created"], {"d": 1}]], [("_create_assets", {"c1": [{"d": 1}]})]),
     )
     def test_execute_actions(
         self,
         case,
         logger_mock,
+        create_assets_mock,
         set_dao_metadata_mock,
         delete_daos_mock,
         transfer_dao_ownerships_mock,
@@ -1165,6 +1154,7 @@ class EventHandlerTest(IntegrationTestCase):
             "_transfer_dao_ownerships": transfer_dao_ownerships_mock,
             "_delete_daos": delete_daos_mock,
             "_set_dao_metadata": set_dao_metadata_mock,
+            "_create_assets": create_assets_mock,
         }
 
         with self.assertNumQueries(3):
