@@ -22,9 +22,8 @@ class ConfigSerializer(Serializer):  # noqa
         min_value=0, help_text="Amount of native balance required to deposit when creating a Proposal."
     )
     block_creation_interval = IntegerField(min_value=0, help_text="In seconds.")
-    core_contract_id = CharField()
-    assets_contract_id = CharField()
-    votes_contract_id = CharField()
+    core_contract_address = CharField()
+    votes_contract_address = CharField()
 
 
 class BalanceSerializer(Serializer):  # noqa

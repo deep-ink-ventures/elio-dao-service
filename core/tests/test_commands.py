@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from django.core.management import call_command
 
@@ -11,7 +11,12 @@ class CommandTest(IntegrationTestCase):
         # todo
         # call_command("blockchain_event_listener")
 
-    @patch("core.management.commands.save_migrate.call_command")
-    def test_save_migrate(self, call_command_mock):
-        call_command("save_migrate")
-        call_command_mock.assert_called_once_with("migrate", "--noinput")
+    @patch("core.management.commands.save_setup.call_command")
+    def test_save_setup(self, call_command_mock):
+        call_command("save_setup")
+        call_command_mock.assert_has_calls(
+            [
+                call("migrate", "--noinput"),
+                call("collectstatic", "--noinput"),
+            ]
+        )

@@ -139,9 +139,8 @@ class CoreViewSetTest(IntegrationTestCase):
             "deposit_to_create_dao": settings.DEPOSIT_TO_CREATE_DAO,
             "deposit_to_create_proposal": settings.DEPOSIT_TO_CREATE_PROPOSAL,
             "block_creation_interval": settings.BLOCK_CREATION_INTERVAL,
-            "core_contract_id": settings.CORE_CONTRACT_ID,
-            "assets_contract_id": settings.ASSETS_CONTRACT_ID,
-            "votes_contract_id": settings.VOTES_CONTRACT_ID,
+            "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
+            "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
         }
 
         with self.assertNumQueries(0):

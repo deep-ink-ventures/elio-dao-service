@@ -1,4 +1,5 @@
 import json
+import random
 from io import BytesIO
 from unittest.mock import call, patch
 
@@ -131,22 +132,48 @@ class EventHandlerTest(IntegrationTestCase):
     def test__create_assets(self):
         event_data = {
             "contract1": [
-                {"dao_id": "dao1", "owner_id": "acc1", "asset_id": "a1", "not": "interesting"},
+                {
+                    "dao_id": "dao1",
+                    "owner_id": "acc1",
+                    "asset_id": "CAN4KOP4PLNTZR7G4USOFBI65GGWJCVCBT7TLIO4EYKVNPDWA554IOV5",
+                    "governance_id": "g1",
+                    "not": "interesting",
+                },
             ],
             "contract2": [
-                {"dao_id": "dao2", "owner_id": "acc2", "asset_id": "a2", "not": "interesting"},
+                {
+                    "dao_id": "dao2",
+                    "owner_id": "acc2",
+                    "asset_id": "CB57XWMJXNLZSHBLLM2LHBU4DNUUA64KOTUBXMI5TYD2LMXSJ7FLRIXD",
+                    "governance_id": "g1",
+                    "not": "interesting",
+                },
             ],
         }
         expected_assets = [
-            models.Asset(id="a1", total_supply=0, owner_id="acc1", dao_id="dao1"),
-            models.Asset(id="a2", total_supply=0, owner_id="acc2", dao_id="dao2"),
+            models.Asset(
+                id="1bc539fc7adb3cc7e6e524e2851ee98d648aa20cff35a1dc261556bc76077bc4",
+                total_supply=0,
+                owner_id="acc1",
+                dao_id="dao1",
+            ),
+            models.Asset(
+                id="7bfbd989bb57991c2b5b34b3869c1b69407b8a74e81bb11d9e07a5b2f24fcab8",
+                total_supply=0,
+                owner_id="acc2",
+                dao_id="dao2",
+            ),
         ]
         expected_asset_holdings = [
-            models.AssetHolding(asset_id="a1", owner_id="acc1", balance=0),
-            models.AssetHolding(asset_id="a2", owner_id="acc2", balance=0),
+            models.AssetHolding(
+                asset_id="1bc539fc7adb3cc7e6e524e2851ee98d648aa20cff35a1dc261556bc76077bc4", owner_id="acc1", balance=0
+            ),
+            models.AssetHolding(
+                asset_id="7bfbd989bb57991c2b5b34b3869c1b69407b8a74e81bb11d9e07a5b2f24fcab8", owner_id="acc2", balance=0
+            ),
         ]
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             soroban_event_handler._create_assets(event_data=event_data)
 
         self.assertModelsEqual(models.Asset.objects.all(), expected_assets)
@@ -154,65 +181,54 @@ class EventHandlerTest(IntegrationTestCase):
             models.AssetHolding.objects.all(), expected_asset_holdings, ignore_fields=("id", "created_at", "updated_at")
         )
 
-    # todo
-    # def test__transfer_assets(self):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Account.objects.create(address="acc3")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Dao.objects.create(id="dao3", name="dao3 name", owner_id="acc3")
-    #     models.Dao.objects.create(id="dao4", name="dao4 name", owner_id="acc3")
-    #     models.Asset.objects.create(id=1, total_supply=150, owner_id="acc1", dao_id="dao1"),
-    #     models.Asset.objects.create(id=2, total_supply=250, owner_id="acc2", dao_id="dao2"),
-    #     models.Asset.objects.create(id=3, total_supply=300, owner_id="acc3", dao_id="dao3"),
-    #     models.Asset.objects.create(id=4, total_supply=400, owner_id="acc3", dao_id="dao4"),
-    #     models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=100),
-    #     models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=50),
-    #     models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=200),
-    #     models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50),
-    #     models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50),
-    #     models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=300),
-    #     models.AssetHolding.objects.create(asset_id=4, owner_id="acc3", balance=400),
-    #     transfers = [
-    #         {"asset_id": 1, "amount": 10, "from": "acc1", "to": "acc2", "not": "interesting"},
-    #         {"asset_id": 1, "amount": 15, "from": "acc1", "to": "acc2", "not": "interesting"},
-    #         {"asset_id": 1, "amount": 25, "from": "acc3", "to": "acc2", "not": "interesting"},
-    #         {"asset_id": 2, "amount": 20, "from": "acc2", "to": "acc1", "not": "interesting"},
-    #         {"asset_id": 3, "amount": 50, "from": "acc3", "to": "acc2", "not": "interesting"},
-    #     ]
-    #     random.shuffle(transfers)  # order mustn't matter
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         event_data={
-    #             "not": "interesting",
-    #             "Assets": {
-    #                 "not": "interesting",
-    #                 "Transferred": transfers,
-    #             },
-    #         },
-    #     )
-    #
-    #     with self.assertNumQueries(3):
-    #         soroban_event_handler._transfer_assets(block)
-    #
-    #     expected_asset_holdings = [
-    #         models.AssetHolding(asset_id=1, owner_id="acc1", balance=75),  # 100 - 10 - 15
-    #         models.AssetHolding(asset_id=1, owner_id="acc2", balance=50),  # 0 + 10 + 15 + 25
-    #         models.AssetHolding(asset_id=1, owner_id="acc3", balance=25),  # 50 - 25
-    #         models.AssetHolding(asset_id=2, owner_id="acc1", balance=20),  # 0 + 20
-    #         models.AssetHolding(asset_id=2, owner_id="acc2", balance=180),  # 200 - 20
-    #         models.AssetHolding(asset_id=2, owner_id="acc3", balance=50),  # 50
-    #         models.AssetHolding(asset_id=3, owner_id="acc2", balance=100),  # 50 + 50
-    #         models.AssetHolding(asset_id=3, owner_id="acc3", balance=250),  # 300 - 50
-    #         models.AssetHolding(asset_id=4, owner_id="acc3", balance=400),  # 300
-    #     ]
-    #     self.assertModelsEqual(
-    #         models.AssetHolding.objects.order_by("asset_id", "owner_id"),
-    #         expected_asset_holdings,
-    #         ignore_fields=("id", "created_at", "updated_at"),
-    #     )
+    def test__transfer_assets(self):
+        models.Account.objects.create(address="acc3")
+        self.contr3 = models.Contract.objects.create(id="contract4")
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
+        models.Dao.objects.create(id="dao4", contract_id="contract4", name="dao4 name", owner_id="acc3")
+        models.Asset.objects.create(id="1", total_supply=150, owner_id="acc1", dao_id="dao1"),
+        models.Asset.objects.create(id="2", total_supply=250, owner_id="acc2", dao_id="dao2"),
+        models.Asset.objects.create(id="3", total_supply=300, owner_id="acc3", dao_id="dao3"),
+        models.Asset.objects.create(id="4", total_supply=400, owner_id="acc3", dao_id="dao4"),
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=100),
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=50),
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=200),
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50),
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50),
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=300),
+        models.AssetHolding.objects.create(asset_id=4, owner_id="acc3", balance=400),
+        transfers = [
+            {"amount": 10, "owner_id": "acc1", "new_owner_id": "acc2", "not": "interesting"},
+            {"amount": 15, "owner_id": "acc1", "new_owner_id": "acc2", "not": "interesting"},
+            {"amount": 25, "owner_id": "acc3", "new_owner_id": "acc2", "not": "interesting"},
+        ]
+        # order mustn't matter
+        random.shuffle(transfers)
+        event_data = {
+            "1": transfers,
+            "2": [{"amount": 20, "owner_id": "acc2", "new_owner_id": "acc1", "not": "interesting"}],
+            "3": [{"amount": 50, "owner_id": "acc3", "new_owner_id": "acc2", "not": "interesting"}],
+        }
+
+        with self.assertNumQueries(4):
+            soroban_event_handler._transfer_assets(event_data=event_data)
+
+        expected_asset_holdings = [
+            models.AssetHolding(asset_id="1", owner_id="acc1", balance=75),  # 100 - 10 - 15
+            models.AssetHolding(asset_id="1", owner_id="acc2", balance=50),  # 0 + 10 + 15 + 25
+            models.AssetHolding(asset_id="1", owner_id="acc3", balance=25),  # 50 - 25
+            models.AssetHolding(asset_id="2", owner_id="acc1", balance=20),  # 0 + 20
+            models.AssetHolding(asset_id="2", owner_id="acc2", balance=180),  # 200 - 20
+            models.AssetHolding(asset_id="2", owner_id="acc3", balance=50),  # 50
+            models.AssetHolding(asset_id="3", owner_id="acc2", balance=100),  # 50 + 50
+            models.AssetHolding(asset_id="3", owner_id="acc3", balance=250),  # 300 - 50
+            models.AssetHolding(asset_id="4", owner_id="acc3", balance=400),  # 300
+        ]
+        self.assertModelsEqual(
+            models.AssetHolding.objects.order_by("asset_id", "owner_id"),
+            expected_asset_holdings,
+            ignore_fields=("id", "created_at", "updated_at"),
+        )
 
     @patch("core.file_handling.file_handler.urlopen")
     def test__set_dao_metadata(self, urlopen_mock):
