@@ -43,8 +43,7 @@ def unpack_scval(val: SCVal):
                     return StrKey.encode_contract(val.address.contract_id.hash)
 
         case SCValType.SCV_I128:
-            # low and high bytes are switched in version 0.0.16 of the stellar-xdr
-            return val.i128.lo.uint64 << 64 | val.i128.hi.uint64
+            return val.i128.hi.int64 << 64 | val.i128.lo.uint64
         case _:
             return str(val)
 
