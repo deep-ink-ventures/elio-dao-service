@@ -192,7 +192,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # soroban
 CORE_CONTRACT_ADDRESS = os.environ.get("CORE_CONTRACT")
 VOTES_CONTRACT_ADDRESS = os.environ.get("VOTES_CONTRACT")
-SOROBAN_START_LEDGER = 311_081
+SOROBAN_START_LEDGER = 600_000
 BLOCKCHAIN_URL = os.environ.get("BLOCKCHAIN_URL")
 BLOCK_CREATION_INTERVAL = int(os.environ.get("BLOCK_CREATION_INTERVAL", 5))  # seconds
 RETRY_DELAYS = [int(_) for _ in os.environ.get("RETRY_DELAYS", "5,10,30,60,120").split(",")]

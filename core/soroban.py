@@ -87,6 +87,8 @@ def retry(description: str):
                     match exc.message:
                         case "start is after newest ledger":
                             log_and_sleep("RequestException (ahead of chain)")
+                        case "start is before oldest ledger":
+                            raise NoLongerAvailableException
                         case _:
                             log_and_sleep(f"RequestException | {exc.message}", log_exception=True)
                 except Exception:  # noqa E722
@@ -98,15 +100,19 @@ def retry(description: str):
 
 
 class SorobanException(Exception):
-    pass
+    msg = None
+
+    def __init__(self, *args):
+        args = (self.msg,) if not args else args
+        super().__init__(*args)
 
 
 class OutOfSyncException(SorobanException):
     msg = "DB and chain are unrecoverably out of sync!"
 
-    def __init__(self, *args):
-        args = (self.msg,) if not args else args
-        super().__init__(*args)
+
+class NoLongerAvailableException(SorobanException):
+    msg = "The requested ledger is no longer available."
 
 
 class SorobanService(object):
@@ -141,9 +147,6 @@ class SorobanService(object):
         Args:
             start_time: time since last block was fetched from chain
 
-        Returns:
-            empty db start Block
-
         empties db, fetches seed accounts, sleeps if start_time was given, returns start Block
         """
         logger.info("DB and chain are out of sync! Recreating DB...")
@@ -158,9 +161,12 @@ class SorobanService(object):
         if start_time:
             self.sleep(start_time=start_time)
 
-    def find_start_ledger(self):
+    def find_start_ledger(self, lower_bound: int = 0):
         """
         searches for the oldest ledger idx starting from envvar SOROBAN_START_LEDGER
+
+        Args:
+            lower_bound: lower bound for the idx search
 
         Returns:
             oldest ledger idx
@@ -181,7 +187,6 @@ class SorobanService(object):
         idx = settings.SOROBAN_START_LEDGER
         while check(idx) == "<":  # find upper bound
             idx *= 2
-        lower_bound = 0
         higher_bound = idx + 1  # upper bound has to be exclusive
 
         while True:  # binary search to find smallest start_ledger
@@ -257,15 +262,9 @@ class SorobanService(object):
         core_models.Contract.objects.bulk_create(
             [core_models.Contract(id=contract_id) for contract_id in contract_ids], ignore_conflicts=True
         )
-        try:
-            blocks = core_models.Block.objects.bulk_create(
-                core_models.Block(number=ledger, event_data=event_data)
-                for ledger, event_data in events_per_block.items()
-            )
-        except IntegrityError:
-            self.clear_db_and_cache()
-            return
-        for block in blocks:
+        for block in core_models.Block.objects.bulk_create(
+            core_models.Block(number=ledger, event_data=event_data) for ledger, event_data in events_per_block.items()
+        ):
             soroban_event_handler.execute_actions(block=block)
         return max(events_per_block.keys()) if events_per_block else res.latest_ledger
 
@@ -273,13 +272,20 @@ class SorobanService(object):
         for block in core_models.Block.objects.filter(executed=False).order_by("number"):
             soroban_event_handler.execute_actions(block=block)
         latest_block = core_models.Block.objects.order_by("-number").first()
-        latest_block_number = latest_block and latest_block.number
+        latest_block_number = latest_block and latest_block.number + 1 or self.find_start_ledger()
         while True:
             start_time = time.time()
-            latest_block_number = self.fetch_and_parse_block(
-                start_ledger=latest_block_number + 1 if latest_block_number else self.find_start_ledger()
-            )
             logger.info(f"Listening... Latest block number: {latest_block_number}")
+            try:
+                latest_block_number = self.fetch_and_parse_block(start_ledger=latest_block_number)
+            except IntegrityError:
+                self.clear_db_and_cache(start_time=start_time)
+                latest_block_number = self.find_start_ledger()
+            except NoLongerAvailableException:
+                latest_block_number = self.find_start_ledger(lower_bound=latest_block.number)
+            else:
+                latest_block_number += 1
+
             self.sleep(start_time=start_time)
 
 
