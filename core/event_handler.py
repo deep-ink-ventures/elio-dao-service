@@ -33,10 +33,11 @@ class SorobanEventHandler:
             ("ASSET", "created"): self._create_assets,
             ("ASSET", "minted"): self._mint_tokens,
             ("ASSET", "transfer"): self._transfer_assets,
+            ("PROPOSAL", "created"): self._create_proposals,
         }
 
     @staticmethod
-    def _create_daos(event_data: dict[list[dict]]):
+    def _create_daos(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -65,7 +66,7 @@ class SorobanEventHandler:
             models.Dao.objects.bulk_create(daos)
 
     @staticmethod
-    def _delete_daos(event_data: dict[list[dict]]):
+    def _delete_daos(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -79,7 +80,7 @@ class SorobanEventHandler:
             models.Dao.objects.filter(id__in=dao_ids).delete()
 
     @staticmethod
-    def _transfer_dao_ownerships(event_data: dict[list[dict]]):
+    def _transfer_dao_ownerships(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -102,7 +103,7 @@ class SorobanEventHandler:
             models.Dao.objects.bulk_update(daos, ["owner_id", "setup_complete"])
 
     @staticmethod
-    def _set_dao_metadata(event_data: dict[list[dict]]):
+    def _set_dao_metadata(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -119,7 +120,7 @@ class SorobanEventHandler:
             tasks.update_dao_metadata.delay(dao_metadata=dao_metadata)
 
     @staticmethod
-    def _create_assets(event_data: dict[list[dict]]):
+    def _create_assets(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -157,7 +158,7 @@ class SorobanEventHandler:
             soroban_service.set_trusted_contract_ids()
 
     @staticmethod
-    def _mint_tokens(event_data: dict[list[dict]]):
+    def _mint_tokens(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -184,7 +185,7 @@ class SorobanEventHandler:
             models.AssetHolding.objects.bulk_update(asset_holdings, ["balance"])
 
     @staticmethod
-    def _transfer_assets(event_data: dict[list[dict]]):
+    def _transfer_assets(event_data: dict[list[dict]], **_):
         """
         Args:
             event_data: event input values by contract_id
@@ -247,39 +248,41 @@ class SorobanEventHandler:
             models.AssetHolding.objects.bulk_create(asset_holdings_to_create.values())
 
     @staticmethod
-    def _dao_set_governances(block: models.Block):
+    def _dao_set_governances(event_data: dict[list[dict]], **_):
         """
         Args:
-            block: Block to set DAO's governance model from
+            event_data: event input values by contract_id
+
 
         Returns:
             None
 
         updates Daos' governance based on event data
         """
-        governances = []
-        dao_ids = set()
-        for governance_event in block.event_data.get("Votes", {}).get("SetGovernanceMajorityVote", []):
-            dao_ids.add(governance_event["dao_id"])
-            governances.append(
-                models.Governance(
-                    dao_id=governance_event["dao_id"],
-                    proposal_duration=governance_event["proposal_duration"],
-                    proposal_token_deposit=governance_event["proposal_token_deposit"],
-                    minimum_majority=governance_event["minimum_majority_per_1024"],
-                    type=models.GovernanceType.MAJORITY_VOTE,
-                )
-            )
-
-        if governances:
-            models.Governance.objects.filter(dao_id__in=dao_ids).delete()
-            models.Governance.objects.bulk_create(governances)
+        # governances = []
+        # dao_ids = set()
+        # for governance_event in block.event_data.get("Votes", {}).get("SetGovernanceMajorityVote", []):
+        #     dao_ids.add(governance_event["dao_id"])
+        #     governances.append(
+        #         models.Governance(
+        #             dao_id=governance_event["dao_id"],
+        #             proposal_duration=governance_event["proposal_duration"],
+        #             proposal_token_deposit=governance_event["proposal_token_deposit"],
+        #             minimum_majority=governance_event["minimum_majority_per_1024"],
+        #             type=models.GovernanceType.MAJORITY_VOTE,
+        #         )
+        #     )
+        #
+        # if governances:
+        #     models.Governance.objects.filter(dao_id__in=dao_ids).delete()
+        #     models.Governance.objects.bulk_create(governances)
 
     @staticmethod
-    def _create_proposals(block: models.Block):
+    def _create_proposals(event_data: dict[list[dict]], block: models.Block, **_):
         """
         Args:
-            block: Block to create Proposals from
+            event_data: event input values by contract_id
+            block: Block the events were extracted from
 
         Returns:
             None
@@ -289,35 +292,40 @@ class SorobanEventHandler:
         proposals = []
         dao_ids = set()
 
-        for proposal_created_event in block.event_data.get("Votes", {}).get("ProposalCreated", []):
-            dao_id = proposal_created_event["dao_id"]
+        for values in chain(*event_data.values()):
+            dao_id = values["dao_id"]
             dao_ids.add(dao_id)
             proposals.append(
                 models.Proposal(
-                    id=proposal_created_event["proposal_id"],
+                    id=str(values["proposal_id"][0]),
                     dao_id=dao_id,
-                    creator_id=proposal_created_event["creator"],
+                    creator_id=values["owner_id"],
                     birth_block_number=block.number,
                 )
             )
         if proposals:
-            dao_id_to_holding_data = collections.defaultdict(list)
+            dao_id_to_holding_data: DefaultDict = collections.defaultdict(list)
             for dao_id, owner_id, balance in models.AssetHolding.objects.filter(asset__dao__id__in=dao_ids).values_list(
                 "asset__dao_id", "owner_id", "balance"
             ):
                 dao_id_to_holding_data[dao_id].append((owner_id, balance))
 
-            dao_id_to_proposal_duration = {
-                dao_id: proposal_duration
-                for dao_id, proposal_duration in models.Governance.objects.filter(dao_id__in=dao_ids).values_list(
-                    "dao_id", "proposal_duration"
-                )
-            }
+            # TODO
+            # dao_id_to_proposal_duration = {
+            #     dao_id: proposal_duration
+            #     for dao_id, proposal_duration in models.Governance.objects.filter(dao_id__in=dao_ids).values_list(
+            #         "dao_id", "proposal_duration"
+            #     )
+            # }
+
             # set end dates for proposals
-            # current time + proposal duration in block * block creation interval (6s)
+            # current time + proposal duration in block * block creation interval
+            proposal_duration = 10_000
+            # finalization_duration = 5_000
+            # proposal_max_nr = 25
             for proposal in proposals:
                 proposal.ends_at = timezone.now() + timezone.timedelta(
-                    seconds=dao_id_to_proposal_duration[proposal.dao_id] * settings.BLOCK_CREATION_INTERVAL
+                    seconds=proposal_duration * settings.BLOCK_CREATION_INTERVAL
                 )
 
             models.Proposal.objects.bulk_create(proposals)
@@ -458,7 +466,7 @@ class SorobanEventHandler:
                 logger.error(f"NotImplementedError{error_base} No action defined for topics: {topics}.")
             else:
                 try:
-                    action(event_data=events_by_contract_id)
+                    action(event_data=events_by_contract_id, block=block)
                 except IntegrityError:
                     msg = "IntegrityError" + error_base
                     logger.exception(msg)

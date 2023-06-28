@@ -24,6 +24,7 @@ class ConfigSerializer(Serializer):  # noqa
     block_creation_interval = IntegerField(min_value=0, help_text="In seconds.")
     core_contract_address = CharField()
     votes_contract_address = CharField()
+    assets_wasm_hash = CharField()
 
 
 class BalanceSerializer(Serializer):  # noqa

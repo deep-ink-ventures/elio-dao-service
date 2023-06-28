@@ -192,6 +192,7 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # soroban
 CORE_CONTRACT_ADDRESS = os.environ.get("CORE_CONTRACT")
 VOTES_CONTRACT_ADDRESS = os.environ.get("VOTES_CONTRACT")
+ASSETS_WASM_HASH = os.environ.get("ASSETS_WASM_HASH")
 SOROBAN_START_LEDGER = 600_000
 BLOCKCHAIN_URL = os.environ.get("BLOCKCHAIN_URL")
 BLOCK_CREATION_INTERVAL = int(os.environ.get("BLOCK_CREATION_INTERVAL", 5))  # seconds

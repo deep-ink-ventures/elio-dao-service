@@ -89,6 +89,7 @@ def config(request, *args, **kwargs):
             "block_creation_interval": settings.BLOCK_CREATION_INTERVAL,
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
+            "assets_wasm_hash": settings.ASSETS_WASM_HASH,
         }
     )
     serializer.is_valid(raise_exception=True)

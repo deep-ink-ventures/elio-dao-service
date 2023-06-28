@@ -41,7 +41,16 @@ def unpack_scval(val: SCVal):
                             return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
                 case SCAddressType.SC_ADDRESS_TYPE_CONTRACT:
                     return StrKey.encode_contract(val.address.contract_id.hash)
-
+        case SCValType.SCV_U32:
+            return val.u32.uint32
+        case SCValType.SCV_I32:
+            return val.i32.int32
+        case SCValType.SCV_U64:
+            return val.u64.uint64
+        case SCValType.SCV_I64:
+            return val.i64.int64
+        case SCValType.SCV_U128:
+            return val.u128.hi.uint64 << 64 | val.i128.lo.uint64
         case SCValType.SCV_I128:
             return val.i128.hi.int64 << 64 | val.i128.lo.uint64
         case _:
