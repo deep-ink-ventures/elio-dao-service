@@ -14,7 +14,5 @@ class BlockMetadataMiddleware(MiddlewareMixin):
     @staticmethod
     def process_response(_request, response):
         if current_block := cache.get("current_block"):
-            block_number, block_hash = current_block
-            response.headers["Block-Number"] = block_number
-            response.headers["Block-Hash"] = block_hash
+            response.headers["Block-Number"] = current_block
         return response

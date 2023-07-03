@@ -118,13 +118,12 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.data, expected_res)
 
     def test_block_metadata_header(self):
-        cache.set(key="current_block", value=(1, "some hash"))
+        cache.set(key="current_block", value=1)
 
         with self.assertNumQueries(0):
             res = self.client.get(reverse("core-welcome"))
 
         self.assertEqual(res.headers["Block-Number"], "1")
-        self.assertEqual(res.headers["Block-Hash"], "some hash")
 
     def test_stats(self):
         expected_res = {"account_count": 4, "dao_count": 2, "proposal_count": 2, "vote_count": 4}

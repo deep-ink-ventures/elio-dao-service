@@ -34,6 +34,7 @@ class SorobanEventHandler:
             ("ASSET", "minted"): self._mint_tokens,
             ("ASSET", "transfer"): self._transfer_assets,
             ("PROPOSAL", "created"): self._create_proposals,
+            ("PROPOSAL", "meta_set"): self._set_proposal_metadata,
         }
 
     @staticmethod
@@ -253,7 +254,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-
         Returns:
             None
 
@@ -340,27 +340,21 @@ class SorobanEventHandler:
             )
 
     @staticmethod
-    def _set_proposal_metadata(block: models.Block):
+    def _set_proposal_metadata(event_data: dict[list[dict]], **_):
         """
-        Args:
-            block: Block to set Proposal's metadata from
+         Args:
+            event_data: event input values by contract_id
 
         Returns:
             None
 
         set Proposals' metadata based on event data
         """
-        proposal_data = {}  # proposal_id: (metadata_hash, metadata_url)
-        for proposal_created_event in block.event_data.get("Votes", {}).get("ProposalMetadataSet", []):
-            for proposal_created_extrinsic in block.extrinsic_data.get("Votes", {}).get("set_metadata", []):
-                if (proposal_id := proposal_created_extrinsic["proposal_id"]) == proposal_created_event["proposal_id"]:
-                    proposal_data[str(proposal_id)] = (
-                        proposal_created_extrinsic["hash"],
-                        proposal_created_extrinsic["meta"],
-                    )
-        if proposal_data:
+        if proposal_data := {
+            str(values["proposal_id"][0]): (values["url"], values["hash"]) for values in chain(*event_data.values())
+        }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=proposal_data.keys())):
-                proposal.metadata_hash, proposal.metadata_url = proposal_data[proposal.id]
+                proposal.metadata_url, proposal.metadata_hash = proposal_data[proposal.id]
             models.Proposal.objects.bulk_update(proposals, fields=["metadata_hash", "metadata_url"])
             tasks.update_proposal_metadata.delay(proposal_ids=list(proposal_data.keys()))
 

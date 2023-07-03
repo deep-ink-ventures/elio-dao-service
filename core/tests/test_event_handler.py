@@ -244,12 +244,8 @@ class EventHandlerTest(IntegrationTestCase):
         metadata_hash_2 = file_handler._hash(file_2.getvalue())
         urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
         event_data = {
-            "contract1": [
-                {"dao_id": "dao1", "url": "url1", "hash": metadata_hash_1, "not": "interesting"},
-            ],
-            "contract2": [
-                {"dao_id": "dao2", "url": "url2", "hash": metadata_hash_2, "not": "interesting"},
-            ],
+            "contract1": [{"dao_id": "dao1", "url": "url1", "hash": metadata_hash_1, "not": "interesting"}],
+            "contract2": [{"dao_id": "dao2", "url": "url2", "hash": metadata_hash_2, "not": "interesting"}],
         }
         expected_daos = [
             models.Dao(
@@ -303,12 +299,8 @@ class EventHandlerTest(IntegrationTestCase):
         file_2 = BytesIO(json.dumps(metadata_2).encode())
         urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
         event_data = {
-            "contract1": [
-                {"dao_id": "dao1", "url": "url1", "hash": metadata_hash_1, "not": "interesting"},
-            ],
-            "contract2": [
-                {"dao_id": "dao2", "url": "url2", "hash": "wrong hash", "not": "interesting"},
-            ],
+            "contract1": [{"dao_id": "dao1", "url": "url1", "hash": metadata_hash_1, "not": "interesting"}],
+            "contract2": [{"dao_id": "dao2", "url": "url2", "hash": "wrong hash", "not": "interesting"}],
         }
         expected_daos = [
             models.Dao(
@@ -361,12 +353,8 @@ class EventHandlerTest(IntegrationTestCase):
 
         download_metadata_mock.side_effect = download_metadata
         event_data = {
-            "contract1": [
-                {"dao_id": "dao1", "url": "url1", "hash": metadata_hash_1, "not": "interesting"},
-            ],
-            "contract2": [
-                {"dao_id": "dao2", "url": "url2", "hash": metadata_hash_2, "not": "interesting"},
-            ],
+            "contract1": [{"dao_id": "dao1", "url": "url1", "hash": metadata_hash_1, "not": "interesting"}],
+            "contract2": [{"dao_id": "dao2", "url": "url2", "hash": metadata_hash_2, "not": "interesting"}],
         }
         expected_daos = [
             models.Dao(
@@ -426,12 +414,8 @@ class EventHandlerTest(IntegrationTestCase):
         )
 
         event_data = {
-            "contract3": [
-                {"dao_id": "dao3", "url": "url1", "hash": "hash1", "not": "interesting"},
-            ],
-            "contract4": [
-                {"dao_id": "dao4", "url": "url2", "hash": "hash2", "not": "interesting"},
-            ],
+            "contract3": [{"dao_id": "dao3", "url": "url1", "hash": "hash1", "not": "interesting"}],
+            "contract4": [{"dao_id": "dao4", "url": "url2", "hash": "hash2", "not": "interesting"}],
         }
         expected_daos = [
             self.dao1,
@@ -526,458 +510,263 @@ class EventHandlerTest(IntegrationTestCase):
     #     ]
     #     self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
-    # todo
-    # def test__create_proposals(self):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Account.objects.create(address="acc3")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Dao.objects.create(id="dao3", name="dao3 name", owner_id="acc3")
-    #     models.Governance.objects.create(
-    #         dao_id="dao1",
-    #         type=models.GovernanceType.MAJORITY_VOTE,
-    #         proposal_duration=10,
-    #         proposal_token_deposit=10,
-    #         minimum_majority=10,
-    #     )
-    #     models.Governance.objects.create(
-    #         dao_id="dao2",
-    #         type=models.GovernanceType.MAJORITY_VOTE,
-    #         proposal_duration=15,
-    #         proposal_token_deposit=10,
-    #         minimum_majority=10,
-    #     )
-    #     models.Governance.objects.create(
-    #         dao_id="dao3",
-    #         type=models.GovernanceType.MAJORITY_VOTE,
-    #         proposal_duration=20,
-    #         proposal_token_deposit=10,
-    #         minimum_majority=10,
-    #     )
-    #     models.Asset.objects.create(id=1, dao_id="dao1", owner_id="acc1", total_supply=100)
-    #     models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=50)
-    #     models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=30)
-    #     models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=20)
-    #     models.Asset.objects.create(id=2, dao_id="dao2", owner_id="acc2", total_supply=100)
-    #     models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50)
-    #     models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=30)
-    #     models.AssetHolding.objects.create(asset_id=2, owner_id="acc1", balance=20)
-    #     models.Asset.objects.create(id=3, dao_id="dao3", owner_id="acc3", total_supply=100)
-    #     models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50)
-    #     models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=30)
-    #     models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=20)
-    #
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=123,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "create_proposal": [
-    #                     {"dao_id": "dao1", "not": "interesting"},
-    #                     {"dao_id": "dao2", "not": "interesting"},
-    #                     # should not be updated cause of missing corresponding event
-    #                     {"dao_id": "dao3", "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalCreated": [
-    #                     {"proposal_id": "prop1", "dao_id": "dao1", "creator": "acc1", "not": "interesting"},
-    #                     {"proposal_id": "prop2", "dao_id": "dao2", "creator": "acc2", "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     time = timezone.now()
-    #     expected_proposals = [
-    #         models.Proposal(id="prop1", dao_id="dao1", creator_id="acc1", birth_block_number=123),
-    #         models.Proposal(id="prop2", dao_id="dao2", creator_id="acc2", birth_block_number=123),
-    #     ]
-    #     expected_votes = [
-    #         models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=None),
-    #         models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=None),
-    #         models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=None),
-    #         models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None),
-    #         models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=None),
-    #         models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None),
-    #     ]
-    #
-    #     with self.assertNumQueries(4), freeze_time(time):
-    #         soroban_event_handler._create_proposals(block)
-    #
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
-    #     self.assertModelsEqual(
-    #         models.Vote.objects.order_by("proposal_id", "-voting_power"),
-    #         expected_votes,
-    #         ignore_fields=("created_at", "updated_at", "id"),
-    #     )
+    def test__create_proposals(self):
+        models.Account.objects.create(address="acc3")
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
+        models.Asset.objects.create(id=1, dao_id="dao1", owner_id="acc1", total_supply=100)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=50)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=30)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=20)
+        models.Asset.objects.create(id=2, dao_id="dao2", owner_id="acc2", total_supply=100)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=30)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc1", balance=20)
+        models.Asset.objects.create(id=3, dao_id="dao3", owner_id="acc3", total_supply=100)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=30)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=20)
+        event_data = {
+            "1": [{"proposal_id": ["prop1"], "dao_id": "dao1", "owner_id": "acc1"}],
+            "2": [{"proposal_id": ["prop2"], "dao_id": "dao2", "owner_id": "acc2"}],
+        }
+        expected_proposals = [
+            models.Proposal(id="prop1", dao_id="dao1", creator_id="acc1", birth_block_number=123),
+            models.Proposal(id="prop2", dao_id="dao2", creator_id="acc2", birth_block_number=123),
+        ]
+        expected_votes = [
+            models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None),
+        ]
 
-    # todo
-    # @patch("core.file_handling.file_handler.urlopen")
-    # def test__set_proposal_metadata(self, urlopen_mock):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
-    #     metadata_1 = {"a": 1}
-    #     file_1 = BytesIO(json.dumps(metadata_1).encode())
-    #     metadata_hash_1 = file_handler._hash(file_1.getvalue())
-    #     metadata_2 = {"a": 2}
-    #     file_2 = BytesIO(json.dumps(metadata_2).encode())
-    #     metadata_hash_2 = file_handler._hash(file_2.getvalue())
-    #
-    #     urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "set_metadata": [
-    #                     {
-    #                         "proposal_id": 1,
-    #                         "hash": metadata_hash_1,
-    #                         "meta": "url1",
-    #                         "not": "interesting",
-    #                     },
-    #                     {
-    #                         "dao_id": "dao2",
-    #                         "proposal_id": 2,
-    #                         "hash": metadata_hash_2,
-    #                         "meta": "url2",
-    #                         "not": "interesting",
-    #                     },
-    #                     # should not be updated cause of missing corresponding event
-    #                     {
-    #                         "dao_id": "dao3",
-    #                         "proposal_id": 3,
-    #                         "hash": metadata_hash_2,
-    #                         "meta": "url2",
-    #                         "not": "interesting",
-    #                     },
-    #                 ],
-    #             },
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalMetadataSet": [
-    #                     {"proposal_id": 1, "not": "interesting"},
-    #                     {"proposal_id": 2, "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_proposals = [
-    #         models.Proposal(
-    #             id="1",
-    #             dao_id="dao1",
-    #             metadata_url="url1",
-    #             metadata_hash=metadata_hash_1,
-    #             metadata=metadata_1,
-    #             birth_block_number=10,
-    #         ),
-    #         models.Proposal(
-    #             id="2",
-    #             dao_id="dao2",
-    #             metadata_url="url2",
-    #             metadata_hash=metadata_hash_2,
-    #             metadata=metadata_2,
-    #             birth_block_number=10,
-    #         ),
-    #     ]
-    #     with self.assertNumQueries(4):
-    #         soroban_event_handler._set_proposal_metadata(block)
-    #
-    #     urlopen_mock.assert_has_calls([call("url1"), call("url2")], any_order=True)
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+        with self.assertNumQueries(4):
+            soroban_event_handler._create_proposals(
+                event_data=event_data, block=models.Block.objects.create(number=123)
+            )
 
-    # todo
-    # @patch("core.tasks.logger")
-    # @patch("core.file_handling.file_handler.urlopen")
-    # def test__proposal_set_metadata_hash_mismatch(self, urlopen_mock, logger_mock):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Account.objects.create(address="acc3")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Dao.objects.create(id="dao3", name="dao3 name", owner_id="acc3")
-    #     models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
-    #     models.Proposal.objects.create(id="3", dao_id="dao3", birth_block_number=10)
-    #     metadata_1 = {"a": 1}
-    #     file_1 = BytesIO(json.dumps(metadata_1).encode())
-    #     metadata_2 = {"a": 2}
-    #     file_2 = BytesIO(json.dumps(metadata_2).encode())
-    #     metadata_hash_2 = file_handler._hash(file_2.getvalue())
-    #
-    #     urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "set_metadata": [
-    #                     {
-    #                         "proposal_id": 1,
-    #                         "hash": "wrong hash",
-    #                         "meta": "url1",
-    #                         "not": "interesting",
-    #                     },
-    #                     {
-    #                         "proposal_id": 2,
-    #                         "hash": metadata_hash_2,
-    #                         "meta": "url2",
-    #                         "not": "interesting",
-    #                     },
-    #                     # should not be updated cause of missing corresponding event
-    #                     {
-    #                         "proposal_id": 3,
-    #                         "hash": metadata_hash_2,
-    #                         "meta": "url2",
-    #                         "not": "interesting",
-    #                     },
-    #                 ],
-    #             },
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalMetadataSet": [
-    #                     {"proposal_id": 1, "not": "interesting"},
-    #                     {"proposal_id": 2, "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_proposals = [
-    #         models.Proposal(
-    #             id="1",
-    #             dao_id="dao1",
-    #             metadata_url="url1",
-    #             metadata_hash="wrong hash",
-    #             metadata=None,
-    #             birth_block_number=10,
-    #         ),
-    #         models.Proposal(
-    #             id="2",
-    #             dao_id="dao2",
-    #             metadata_url="url2",
-    #             metadata_hash=metadata_hash_2,
-    #             metadata=metadata_2,
-    #             birth_block_number=10,
-    #         ),
-    #         models.Proposal(
-    #             id="3",
-    #             dao_id="dao3",
-    #             metadata_url=None,
-    #             metadata_hash=None,
-    #             metadata=None,
-    #             birth_block_number=10,
-    #         ),
-    #     ]
-    #
-    #     with self.assertNumQueries(4):
-    #         soroban_event_handler._set_proposal_metadata(block)
-    #
-    #     urlopen_mock.assert_has_calls([call("url1"), call("url2")], any_order=True)
-    #     logger_mock.error.assert_called_once_with("Hash mismatch while fetching Proposal metadata from provided url.")
-    #
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+        self.assertModelsEqual(
+            models.Vote.objects.order_by("proposal_id", "-voting_power"),
+            expected_votes,
+            ignore_fields=("created_at", "updated_at", "id"),
+        )
 
-    # todo
-    # @patch("core.tasks.logger")
-    # @patch("core.file_handling.file_handler.FileHandler.download_metadata")
-    # def test__proposals_set_metadata_exception(self, download_metadata_mock, logger_mock):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
-    #     metadata_1 = {"a": 1}
-    #     file_1 = BytesIO(json.dumps(metadata_1).encode())
-    #     metadata_hash_1 = file_handler._hash(file_1.getvalue())
-    #     metadata_2 = {"a": 2}
-    #     file_2 = BytesIO(json.dumps(metadata_2).encode())
-    #     metadata_hash_2 = file_handler._hash(file_2.getvalue())
-    #
-    #     def download_metadata(url, **_):
-    #         if url == "url1":
-    #             raise Exception("roar")
-    #         return metadata_2
-    #
-    #     download_metadata_mock.side_effect = download_metadata
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "set_metadata": [
-    #                     {
-    #                         "dao_id": "dao1",
-    #                         "proposal_id": 1,
-    #                         "hash": metadata_hash_1,
-    #                         "meta": "url1",
-    #                         "not": "interesting",
-    #                     },
-    #                     {
-    #                         "dao_id": "dao2",
-    #                         "proposal_id": 2,
-    #                         "hash": metadata_hash_2,
-    #                         "meta": "url2",
-    #                         "not": "interesting",
-    #                     },
-    #                 ],
-    #             },
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalMetadataSet": [
-    #                     {"proposal_id": 1, "not": "interesting"},
-    #                     {"proposal_id": 2, "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_proposals = [
-    #         models.Proposal(
-    #             id="1",
-    #             dao_id="dao1",
-    #             metadata_url="url1",
-    #             metadata_hash=metadata_hash_1,
-    #             metadata=None,
-    #             birth_block_number=10,
-    #         ),
-    #         models.Proposal(
-    #             id="2",
-    #             dao_id="dao2",
-    #             metadata_url="url2",
-    #             metadata_hash=metadata_hash_2,
-    #             metadata=metadata_2,
-    #             birth_block_number=10,
-    #         ),
-    #     ]
-    #
-    #     with self.assertNumQueries(4):
-    #         soroban_event_handler._set_proposal_metadata(block)
-    #
-    #     download_metadata_mock.assert_has_calls(
-    #         [
-    #             call(url="url1", metadata_hash=metadata_hash_1),
-    #             call(url="url2", metadata_hash=metadata_hash_2),
-    #         ],
-    #         any_order=True,
-    #     )
-    #     logger_mock.exception.assert_called_once_with(
-    #         "Unexpected error while fetching Proposal metadata from provided url."
-    #     )
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+    @patch("core.file_handling.file_handler.urlopen")
+    def test__set_proposal_metadata(self, urlopen_mock):
+        models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
+        metadata_1 = {"a": 1}
+        file_1 = BytesIO(json.dumps(metadata_1).encode())
+        metadata_hash_1 = file_handler._hash(file_1.getvalue())
+        metadata_2 = {"a": 2}
+        file_2 = BytesIO(json.dumps(metadata_2).encode())
+        metadata_hash_2 = file_handler._hash(file_2.getvalue())
 
-    # todo
-    # @patch("core.tasks.logger")
-    # @patch("core.file_handling.file_handler.FileHandler.download_metadata")
-    # def test__create_proposals_everything_failed(self, download_metadata_mock, logger_mock):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
-    #     metadata_1 = {"a": 1}
-    #     file_1 = BytesIO(json.dumps(metadata_1).encode())
-    #     metadata_hash_1 = file_handler._hash(file_1.getvalue())
-    #     metadata_2 = {"a": 2}
-    #     file_2 = BytesIO(json.dumps(metadata_2).encode())
-    #     metadata_hash_2 = file_handler._hash(file_2.getvalue())
-    #
-    #     download_metadata_mock.side_effect = Exception
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "set_metadata": [
-    #                     {
-    #                         "dao_id": "dao1",
-    #                         "proposal_id": "1",
-    #                         "hash": metadata_hash_1,
-    #                         "meta": "url1",
-    #                         "not": "interesting",
-    #                     },
-    #                     {
-    #                         "dao_id": "dao2",
-    #                         "proposal_id": "2",
-    #                         "hash": metadata_hash_2,
-    #                         "meta": "url2",
-    #                         "not": "interesting",
-    #                     },
-    #                 ],
-    #             },
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalMetadataSet": [
-    #                     {"proposal_id": "1", "not": "interesting"},
-    #                     {"proposal_id": "2", "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_proposals = [
-    #         models.Proposal(
-    #             id="1",
-    #             dao_id="dao1",
-    #             metadata_url="url1",
-    #             metadata_hash=metadata_hash_1,
-    #             metadata=None,
-    #             birth_block_number=10,
-    #         ),
-    #         models.Proposal(
-    #             id="2",
-    #             dao_id="dao2",
-    #             metadata_url="url2",
-    #             metadata_hash=metadata_hash_2,
-    #             metadata=None,
-    #             birth_block_number=10,
-    #         ),
-    #     ]
-    #
-    #     with self.assertNumQueries(3):
-    #         soroban_event_handler._set_proposal_metadata(block)
-    #
-    #     download_metadata_mock.assert_has_calls(
-    #         [
-    #             call(url="url1", metadata_hash=metadata_hash_1),
-    #             call(url="url2", metadata_hash=metadata_hash_2),
-    #         ],
-    #         any_order=True,
-    #     )
-    #     logger_mock.exception.assert_has_calls(
-    #         [call("Unexpected error while fetching Proposal metadata from provided url.")] * 2
-    #     )
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+        urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
+        event_data = {
+            "1": [
+                {"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1},
+            ],
+            "2": [
+                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+            ],
+        }
+        expected_proposals = [
+            models.Proposal(
+                id="1",
+                dao_id="dao1",
+                metadata_url="url1",
+                metadata_hash=metadata_hash_1,
+                metadata=metadata_1,
+                birth_block_number=10,
+            ),
+            models.Proposal(
+                id="2",
+                dao_id="dao2",
+                metadata_url="url2",
+                metadata_hash=metadata_hash_2,
+                metadata=metadata_2,
+                birth_block_number=10,
+            ),
+        ]
+        with self.assertNumQueries(4):
+            soroban_event_handler._set_proposal_metadata(event_data=event_data)
+
+        urlopen_mock.assert_has_calls([call("url1"), call("url2")], any_order=True)
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+
+    @patch("core.tasks.logger")
+    @patch("core.file_handling.file_handler.urlopen")
+    def test__proposal_set_metadata_hash_mismatch(self, urlopen_mock, logger_mock):
+        models.Account.objects.create(address="acc3")
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
+        models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
+        models.Proposal.objects.create(id="3", dao_id="dao3", birth_block_number=10)
+        metadata_1 = {"a": 1}
+        file_1 = BytesIO(json.dumps(metadata_1).encode())
+        metadata_2 = {"a": 2}
+        file_2 = BytesIO(json.dumps(metadata_2).encode())
+        metadata_hash_2 = file_handler._hash(file_2.getvalue())
+
+        urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
+        event_data = {
+            "1": [
+                {"proposal_id": ["1"], "url": "url1", "hash": "wrong hash"},
+            ],
+            "2": [
+                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+            ],
+        }
+        expected_proposals = [
+            models.Proposal(
+                id="1",
+                dao_id="dao1",
+                metadata_url="url1",
+                metadata_hash="wrong hash",
+                metadata=None,
+                birth_block_number=10,
+            ),
+            models.Proposal(
+                id="2",
+                dao_id="dao2",
+                metadata_url="url2",
+                metadata_hash=metadata_hash_2,
+                metadata=metadata_2,
+                birth_block_number=10,
+            ),
+            models.Proposal(
+                id="3",
+                dao_id="dao3",
+                metadata_url=None,
+                metadata_hash=None,
+                metadata=None,
+                birth_block_number=10,
+            ),
+        ]
+
+        with self.assertNumQueries(4):
+            soroban_event_handler._set_proposal_metadata(event_data=event_data)
+
+        urlopen_mock.assert_has_calls([call("url1"), call("url2")], any_order=True)
+        logger_mock.error.assert_called_once_with("Hash mismatch while fetching Proposal metadata from provided url.")
+
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+
+    @patch("core.tasks.logger")
+    @patch("core.file_handling.file_handler.FileHandler.download_metadata")
+    def test__proposals_set_metadata_exception(self, download_metadata_mock, logger_mock):
+        models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
+        metadata_1 = {"a": 1}
+        file_1 = BytesIO(json.dumps(metadata_1).encode())
+        metadata_hash_1 = file_handler._hash(file_1.getvalue())
+        metadata_2 = {"a": 2}
+        file_2 = BytesIO(json.dumps(metadata_2).encode())
+        metadata_hash_2 = file_handler._hash(file_2.getvalue())
+
+        def download_metadata(url, **_):
+            if url == "url1":
+                raise Exception("roar")
+            return metadata_2
+
+        download_metadata_mock.side_effect = download_metadata
+        event_data = {
+            "1": [{"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1}],
+            "2": [{"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2}],
+        }
+
+        expected_proposals = [
+            models.Proposal(
+                id="1",
+                dao_id="dao1",
+                metadata_url="url1",
+                metadata_hash=metadata_hash_1,
+                metadata=None,
+                birth_block_number=10,
+            ),
+            models.Proposal(
+                id="2",
+                dao_id="dao2",
+                metadata_url="url2",
+                metadata_hash=metadata_hash_2,
+                metadata=metadata_2,
+                birth_block_number=10,
+            ),
+        ]
+
+        with self.assertNumQueries(4):
+            soroban_event_handler._set_proposal_metadata(event_data=event_data)
+
+        download_metadata_mock.assert_has_calls(
+            [
+                call(url="url1", metadata_hash=metadata_hash_1),
+                call(url="url2", metadata_hash=metadata_hash_2),
+            ],
+            any_order=True,
+        )
+        logger_mock.exception.assert_called_once_with(
+            "Unexpected error while fetching Proposal metadata from provided url."
+        )
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+
+    @patch("core.tasks.logger")
+    @patch("core.file_handling.file_handler.FileHandler.download_metadata")
+    def test__create_proposals_everything_failed(self, download_metadata_mock, logger_mock):
+        models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="2", dao_id="dao2", birth_block_number=10)
+        metadata_1 = {"a": 1}
+        file_1 = BytesIO(json.dumps(metadata_1).encode())
+        metadata_hash_1 = file_handler._hash(file_1.getvalue())
+        metadata_2 = {"a": 2}
+        file_2 = BytesIO(json.dumps(metadata_2).encode())
+        metadata_hash_2 = file_handler._hash(file_2.getvalue())
+
+        download_metadata_mock.side_effect = Exception
+        event_data = {
+            "1": [
+                {"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1},
+            ],
+            "2": [
+                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+            ],
+        }
+        expected_proposals = [
+            models.Proposal(
+                id="1",
+                dao_id="dao1",
+                metadata_url="url1",
+                metadata_hash=metadata_hash_1,
+                metadata=None,
+                birth_block_number=10,
+            ),
+            models.Proposal(
+                id="2",
+                dao_id="dao2",
+                metadata_url="url2",
+                metadata_hash=metadata_hash_2,
+                metadata=None,
+                birth_block_number=10,
+            ),
+        ]
+
+        with self.assertNumQueries(3):
+            soroban_event_handler._set_proposal_metadata(event_data=event_data)
+
+        download_metadata_mock.assert_has_calls(
+            [
+                call(url="url1", metadata_hash=metadata_hash_1),
+                call(url="url2", metadata_hash=metadata_hash_2),
+            ],
+            any_order=True,
+        )
+        logger_mock.exception.assert_has_calls(
+            [call("Unexpected error while fetching Proposal metadata from provided url.")] * 2
+        )
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
     # todo
     # def test__register_votes(self):
@@ -1183,7 +972,7 @@ class EventHandlerTest(IntegrationTestCase):
         )
         for expected_call in expected_calls:
             func, args = expected_call
-            func_to_mock.pop(func).assert_called_once_with(event_data=args)
+            func_to_mock.pop(func).assert_called_once_with(event_data=args, block=block)
         for mock in func_to_mock.values():
             mock.assert_not_called()
         block.refresh_from_db()
@@ -1201,7 +990,7 @@ class EventHandlerTest(IntegrationTestCase):
 
         block.refresh_from_db()
         self.assertFalse(block.executed)
-        action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]})
+        action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
         logger_mock.exception.assert_called_once_with("IntegrityError during block execution. Block number: 0.")
 
     @patch("core.event_handler.logger")
@@ -1215,5 +1004,5 @@ class EventHandlerTest(IntegrationTestCase):
 
         block.refresh_from_db()
         self.assertFalse(block.executed)
-        action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]})
+        action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
         logger_mock.exception.assert_called_once_with("Unexpected error during block execution. Block number: 0.")
