@@ -26,6 +26,8 @@ def unpack_scval(val: SCVal):
             return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
         case SCValType.SCV_VEC:
             return [unpack_scval(entry) for entry in val.vec.sc_vec]
+        case SCValType.SCV_BOOL:
+            return val.b
         case SCValType.SCV_SYMBOL:
             return val.sym.sc_symbol.decode().strip()
         case SCValType.SCV_BYTES:
@@ -50,7 +52,7 @@ def unpack_scval(val: SCVal):
         case SCValType.SCV_I64:
             return val.i64.int64
         case SCValType.SCV_U128:
-            return val.u128.hi.uint64 << 64 | val.i128.lo.uint64
+            return val.u128.hi.uint64 << 64 | val.u128.lo.uint64
         case SCValType.SCV_I128:
             return val.i128.hi.int64 << 64 | val.i128.lo.uint64
         case _:
@@ -291,7 +293,7 @@ class SorobanService(object):
                 self.clear_db_and_cache(start_time=start_time)
                 latest_block_number = self.find_start_ledger()
             except NoLongerAvailableException:
-                latest_block_number = self.find_start_ledger(lower_bound=latest_block.number)
+                latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
             else:
                 latest_block_number += 1
 

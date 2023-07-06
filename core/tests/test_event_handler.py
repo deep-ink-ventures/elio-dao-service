@@ -768,159 +768,109 @@ class EventHandlerTest(IntegrationTestCase):
         )
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    # todo
-    # def test__register_votes(self):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Account.objects.create(address="acc3")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Dao.objects.create(id="dao3", name="dao3 name", owner_id="acc3")
-    #     models.Proposal.objects.create(id="prop1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop2", dao_id="dao2", birth_block_number=10)
-    #     models.Vote.objects.create(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=None)
-    #     models.Vote.objects.create(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=None)
-    #     models.Vote.objects.create(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=None)
-    #     models.Vote.objects.create(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None)
-    #     models.Vote.objects.create(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=None)
-    #     models.Vote.objects.create(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None)
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "VoteCast": [
-    #                     {"proposal_id": "prop1", "voter": "acc1", "in_favor": True, "not": "interesting"},
-    #                     {"proposal_id": "prop1", "voter": "acc2", "in_favor": False, "not": "interesting"},
-    #                     {"proposal_id": "prop1", "voter": "acc3", "in_favor": False, "not": "interesting"},
-    #                     {"proposal_id": "prop2", "voter": "acc1", "in_favor": True, "not": "interesting"},
-    #                     {"proposal_id": "prop2", "voter": "acc2", "in_favor": True, "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_votes = [
-    #         models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=True),
-    #         models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=False),
-    #         models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=False),
-    #         models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=True),
-    #         models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=True),
-    #         models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None),
-    #     ]
-    #
-    #     with self.assertNumQueries(2):
-    #         soroban_event_handler._register_votes(block)
-    #
-    #     self.assertModelsEqual(
-    #         models.Vote.objects.order_by("proposal_id", "voter_id"),
-    #         expected_votes,
-    #         ignore_fields=("created_at", "updated_at", "id"),
-    #     )
+    def test__register_votes(self):
+        models.Account.objects.create(address="acc3")
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
+        models.Proposal.objects.create(id="prop1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop2", dao_id="dao2", birth_block_number=10)
+        models.Vote.objects.create(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=None)
+        models.Vote.objects.create(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=None)
+        models.Vote.objects.create(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=None)
+        models.Vote.objects.create(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None)
+        models.Vote.objects.create(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=None)
+        models.Vote.objects.create(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None)
+        event_data = {
+            "c1": [
+                {"proposal_id": ["prop1"], "voter_id": "acc1", "in_favor": True, "not": "interesting"},
+                {"proposal_id": ["prop1"], "voter_id": "acc2", "in_favor": False, "not": "interesting"},
+                {"proposal_id": ["prop1"], "voter_id": "acc3", "in_favor": False, "not": "interesting"},
+                {"proposal_id": ["prop2"], "voter_id": "acc1", "in_favor": True, "not": "interesting"},
+                {"proposal_id": ["prop2"], "voter_id": "acc2", "in_favor": True, "not": "interesting"},
+            ],
+        }
+        expected_votes = [
+            models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=True),
+            models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=False),
+            models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=False),
+            models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=True),
+            models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=True),
+            models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None),
+        ]
 
-    # todo
-    # def test__finalize_proposals(self):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Proposal.objects.create(id="prop1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop2", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop3", dao_id="dao2", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop4", dao_id="dao2", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop5", dao_id="dao2", birth_block_number=10)
-    #     # not changed
-    #     models.Proposal.objects.create(id="prop6", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop7", dao_id="dao2", birth_block_number=10)
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalAccepted": [
-    #                     {"proposal_id": "prop1", "not": "interesting"},
-    #                     {"proposal_id": "prop3", "not": "interesting"},
-    #                     {"proposal_id": "prop4", "not": "interesting"},
-    #                 ],
-    #                 "ProposalRejected": [
-    #                     {"proposal_id": "prop2", "not": "interesting"},
-    #                     {"proposal_id": "prop5", "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_proposals = [
-    #         models.Proposal(id="prop1", dao_id="dao1", status=models.ProposalStatus.PENDING, birth_block_number=10),
-    #         models.Proposal(id="prop2", dao_id="dao1", status=models.ProposalStatus.REJECTED, birth_block_number=10),
-    #         models.Proposal(id="prop3", dao_id="dao2", status=models.ProposalStatus.PENDING, birth_block_number=10),
-    #         models.Proposal(id="prop4", dao_id="dao2", status=models.ProposalStatus.PENDING, birth_block_number=10),
-    #         models.Proposal(id="prop5", dao_id="dao2", status=models.ProposalStatus.REJECTED, birth_block_number=10),
-    #         models.Proposal(id="prop6", dao_id="dao1", status=models.ProposalStatus.RUNNING, birth_block_number=10),
-    #         models.Proposal(id="prop7", dao_id="dao2", status=models.ProposalStatus.RUNNING, birth_block_number=10),
-    #     ]
-    #
-    #     with self.assertNumQueries(2):
-    #         soroban_event_handler._finalize_proposals(block)
-    #
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+        with self.assertNumQueries(2):
+            soroban_event_handler._register_votes(event_data=event_data)
 
-    # todo
-    # def test__fault_proposals(self):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Proposal.objects.create(id="prop1", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop2", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop3", dao_id="dao2", birth_block_number=10)
-    #     # not changed
-    #     models.Proposal.objects.create(id="prop4", dao_id="dao1", birth_block_number=10)
-    #     models.Proposal.objects.create(id="prop5", dao_id="dao2", birth_block_number=10)
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "not": "interesting",
-    #                 "ProposalFaulted": [
-    #                     {"proposal_id": "prop1", "reason": "reason 1", "not": "interesting"},
-    #                     {"proposal_id": "prop2", "reason": "reason 2", "not": "interesting"},
-    #                     {"proposal_id": "prop3", "reason": "reason 3", "not": "interesting"},
-    #                 ],
-    #             },
-    #         },
-    #     )
-    #     expected_proposals = [
-    #         models.Proposal(
-    # noqa            id="prop1", dao_id="dao1", fault="reason 1", status=models.ProposalStatus.FAULTED, birth_block_number=10
-    #         ),
-    #         models.Proposal(
-    # noqa            id="prop2", dao_id="dao1", fault="reason 2", status=models.ProposalStatus.FAULTED, birth_block_number=10
-    #         ),
-    #         models.Proposal(
-    # noqa            id="prop3", dao_id="dao2", fault="reason 3", status=models.ProposalStatus.FAULTED, birth_block_number=10
-    #         ),
-    #         models.Proposal(id="prop4", dao_id="dao1", status=models.ProposalStatus.RUNNING, birth_block_number=10),
-    #         models.Proposal(id="prop5", dao_id="dao2", status=models.ProposalStatus.RUNNING, birth_block_number=10),
-    #     ]
-    #
-    #     with self.assertNumQueries(2):
-    #         soroban_event_handler._fault_proposals(block)
-    #
-    #     self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+        self.assertModelsEqual(
+            models.Vote.objects.order_by("proposal_id", "voter_id"),
+            expected_votes,
+            ignore_fields=("created_at", "updated_at", "id"),
+        )
+
+    def test__update_proposal_status(self):
+        models.Proposal.objects.create(id="prop1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop2", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop3", dao_id="dao2", birth_block_number=10)
+        models.Proposal.objects.create(id="prop4", dao_id="dao2", birth_block_number=10)
+        models.Proposal.objects.create(id="prop5", dao_id="dao2", birth_block_number=10)
+        # not changed
+        models.Proposal.objects.create(id="prop6", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop7", dao_id="dao2", birth_block_number=10)
+        event_data = {
+            "c1": [
+                {"proposal_id": ["prop1"], "status": ["Accepted"]},
+                {"proposal_id": ["prop3"], "status": ["Accepted"]},
+                {"proposal_id": ["prop4"], "status": ["Implemented"]},
+                {"proposal_id": ["prop2"], "status": ["Rejected"]},
+                {"proposal_id": ["prop5"], "status": ["Rejected"]},
+            ],
+        }
+        expected_proposals = [
+            models.Proposal(id="prop1", dao_id="dao1", status=models.ProposalStatus.PENDING, birth_block_number=10),
+            models.Proposal(id="prop2", dao_id="dao1", status=models.ProposalStatus.REJECTED, birth_block_number=10),
+            models.Proposal(id="prop3", dao_id="dao2", status=models.ProposalStatus.PENDING, birth_block_number=10),
+            models.Proposal(id="prop4", dao_id="dao2", status=models.ProposalStatus.IMPLEMENTED, birth_block_number=10),
+            models.Proposal(id="prop5", dao_id="dao2", status=models.ProposalStatus.REJECTED, birth_block_number=10),
+            models.Proposal(id="prop6", dao_id="dao1", status=models.ProposalStatus.RUNNING, birth_block_number=10),
+            models.Proposal(id="prop7", dao_id="dao2", status=models.ProposalStatus.RUNNING, birth_block_number=10),
+        ]
+
+        with self.assertNumQueries(2):
+            soroban_event_handler._update_proposal_status(event_data=event_data)
+
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
+
+    def test__fault_proposals(self):
+        models.Proposal.objects.create(id="prop1", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop2", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop3", dao_id="dao2", birth_block_number=10)
+        # not changed
+        models.Proposal.objects.create(id="prop4", dao_id="dao1", birth_block_number=10)
+        models.Proposal.objects.create(id="prop5", dao_id="dao2", birth_block_number=10)
+        event_data = {
+            "c1": [
+                {"proposal_id": ["prop1"], "reason": "reason 1", "not": "interesting"},
+                {"proposal_id": ["prop2"], "reason": "reason 2", "not": "interesting"},
+                {"proposal_id": ["prop3"], "reason": "reason 3", "not": "interesting"},
+            ]
+        }
+        expected_proposals = [
+            models.Proposal(
+                id="prop1", dao_id="dao1", fault="reason 1", status=models.ProposalStatus.FAULTED, birth_block_number=10
+            ),
+            models.Proposal(
+                id="prop2", dao_id="dao1", fault="reason 2", status=models.ProposalStatus.FAULTED, birth_block_number=10
+            ),
+            models.Proposal(
+                id="prop3", dao_id="dao2", fault="reason 3", status=models.ProposalStatus.FAULTED, birth_block_number=10
+            ),
+            models.Proposal(id="prop4", dao_id="dao1", status=models.ProposalStatus.RUNNING, birth_block_number=10),
+            models.Proposal(id="prop5", dao_id="dao2", status=models.ProposalStatus.RUNNING, birth_block_number=10),
+        ]
+
+        with self.assertNumQueries(2):
+            soroban_event_handler._fault_proposals(event_data=event_data)
+
+        self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
     @patch("core.event_handler.SorobanEventHandler._create_daos")
     @patch("core.event_handler.SorobanEventHandler._transfer_dao_ownerships")

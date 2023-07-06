@@ -33,8 +33,12 @@ class SorobanEventHandler:
             ("ASSET", "created"): self._create_assets,
             ("ASSET", "minted"): self._mint_tokens,
             ("ASSET", "transfer"): self._transfer_assets,
+            ("PROPOSAL", "conf_set"): self._dao_set_governances,
             ("PROPOSAL", "created"): self._create_proposals,
             ("PROPOSAL", "meta_set"): self._set_proposal_metadata,
+            ("PROPOSAL", "vote_cast"): self._register_votes,
+            ("PROPOSAL", "state_upd"): self._update_proposal_status,
+            ("PROPOSAL", "faulted"): self._fault_proposals,
         }
 
     @staticmethod
@@ -201,6 +205,7 @@ class SorobanEventHandler:
         asset_ids_to_owner_ids = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
         asset_id: str
         accs = set()
+        # contract_id becomes asset_id
         for asset_id, transfers in event_data.items():
             for transfer in transfers:
                 amount, from_acc, to_acc = transfer["amount"], transfer["owner_id"], transfer["new_owner_id"]
@@ -259,23 +264,23 @@ class SorobanEventHandler:
 
         updates Daos' governance based on event data
         """
-        # governances = []
-        # dao_ids = set()
-        # for governance_event in block.event_data.get("Votes", {}).get("SetGovernanceMajorityVote", []):
-        #     dao_ids.add(governance_event["dao_id"])
-        #     governances.append(
-        #         models.Governance(
-        #             dao_id=governance_event["dao_id"],
-        #             proposal_duration=governance_event["proposal_duration"],
-        #             proposal_token_deposit=governance_event["proposal_token_deposit"],
-        #             minimum_majority=governance_event["minimum_majority_per_1024"],
-        #             type=models.GovernanceType.MAJORITY_VOTE,
-        #         )
-        #     )
-        #
-        # if governances:
-        #     models.Governance.objects.filter(dao_id__in=dao_ids).delete()
-        #     models.Governance.objects.bulk_create(governances)
+        governances = []
+        dao_ids = set()
+        for values in chain(*event_data.values()):
+            dao_ids.add(values["dao_id"])
+            governances.append(
+                models.Governance(
+                    dao_id=values["dao_id"],
+                    proposal_duration=values["proposal_duration"],
+                    proposal_token_deposit=values["proposal_token_deposit"],
+                    minimum_majority=0,  # noqa: E501 todo waiting for https://github.com/deep-ink-ventures/elio-dao-protocol/issues/45
+                    type={"MAJORITY": models.GovernanceType.MAJORITY_VOTE}.get(values["proposal_voting_type"][0]),
+                )
+            )
+
+        if governances:
+            models.Governance.objects.filter(dao_id__in=dao_ids).delete()
+            models.Governance.objects.bulk_create(governances)
 
     @staticmethod
     def _create_proposals(event_data: dict[list[dict]], block: models.Block, **_):
@@ -359,21 +364,19 @@ class SorobanEventHandler:
             tasks.update_proposal_metadata.delay(proposal_ids=list(proposal_data.keys()))
 
     @staticmethod
-    def _register_votes(block: models.Block):
+    def _register_votes(event_data: dict[list[dict]], **_):
         """
-        Args:
-            block: Block to register votes from
+         Args:
+            event_data: event input values by contract_id
 
         Returns:
             None
 
-        registers Votes based on the Block's event_data
+        register Votes based on event data
         """
         proposal_ids_to_voting_data = collections.defaultdict(dict)  # {proposal_id: {voter_id: in_favor}}
-        for voting_event in block.event_data.get("Votes", {}).get("VoteCast", []):
-            proposal_ids_to_voting_data[str(voting_event["proposal_id"])][voting_event["voter"]] = voting_event[
-                "in_favor"
-            ]
+        for values in chain(*event_data.values()):
+            proposal_ids_to_voting_data[str(values["proposal_id"][0])][values["voter_id"]] = values["in_favor"]
         if proposal_ids_to_voting_data:
             for vote in (
                 votes_to_update := models.Vote.objects.filter(
@@ -395,41 +398,47 @@ class SorobanEventHandler:
             models.Vote.objects.bulk_update(votes_to_update, ["in_favor"])
 
     @staticmethod
-    def _finalize_proposals(block: models.Block):
+    def _update_proposal_status(event_data: dict[list[dict]], **_):
         """
-        Args:
-            block: Block to finalize proposals from
+         Args:
+            event_data: event input values by contract_id
 
         Returns:
             None
 
-        finalizes Proposals based on the Block's event_data
+        updates Proposals status based on event data
         """
-        votes_events = block.event_data.get("Votes", {})
-        if accepted_proposal_ids := set(prop["proposal_id"] for prop in votes_events.get("ProposalAccepted", [])):
-            models.Proposal.objects.filter(id__in=accepted_proposal_ids).update(status=models.ProposalStatus.PENDING)
-        if rejected_proposal_ids := set(prop["proposal_id"] for prop in votes_events.get("ProposalRejected", [])):
-            models.Proposal.objects.filter(id__in=rejected_proposal_ids).update(status=models.ProposalStatus.REJECTED)
+        proposal_id_to_status = {}
+        for values in chain(*event_data.values()):
+            proposal_id_to_status[str(values["proposal_id"][0])] = {
+                "Accepted": models.ProposalStatus.PENDING,
+                "Rejected": models.ProposalStatus.REJECTED,
+                "Implemented": models.ProposalStatus.IMPLEMENTED,
+            }.get(values["status"][0])
+        for proposal in (proposals := models.Proposal.objects.filter(id__in=proposal_id_to_status.keys())):
+            proposal.status = proposal_id_to_status[proposal.id]
+        if proposals:
+            models.Proposal.objects.bulk_update(proposals, ["status"])
 
     @staticmethod
-    def _fault_proposals(block: models.Block):
+    def _fault_proposals(event_data: dict[list[dict]], **_):
         """
-        Args:
-            block: Block to fault proposals from
+         Args:
+            event_data: event input values by contract_id
 
         Returns:
             None
 
-        faults Proposals based on the Block's event_data
+        faults Proposals' based on event data
         """
         if faulted_proposals := {
-            fault_event["proposal_id"]: fault_event["reason"]
-            for fault_event in block.event_data.get("Votes", {}).get("ProposalFaulted", [])
+            str(values["proposal_id"][0]): values["reason"] for values in chain(*event_data.values())
         }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=faulted_proposals.keys())):
                 proposal.fault = faulted_proposals[proposal.id]
                 proposal.status = models.ProposalStatus.FAULTED
-            models.Proposal.objects.bulk_update(proposals, ("fault", "status"))
+            if proposals:
+                models.Proposal.objects.bulk_update(proposals, ("fault", "status"))
 
     @transaction.atomic
     def execute_actions(self, block: models.Block):
