@@ -3,6 +3,7 @@ from unittest.mock import Mock
 from settings.settings import BASE_DIR
 
 TESTING = True
+CONFIG_SECRET = "much-secure"
 
 MEDIA_URL = "/test-media/"
 MEDIA_ROOT = BASE_DIR / "test-media"

@@ -9,7 +9,12 @@ from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
-from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST
+from rest_framework.status import (
+    HTTP_200_OK,
+    HTTP_201_CREATED,
+    HTTP_400_BAD_REQUEST,
+    HTTP_401_UNAUTHORIZED,
+)
 from rest_framework.throttling import UserRateThrottle
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
@@ -93,7 +98,38 @@ def config(request, *args, **kwargs):
         }
     )
     serializer.is_valid(raise_exception=True)
-    return Response(serializer.data)
+    return Response(data=serializer.data)
+
+
+@swagger_auto_schema(
+    method="PATCH",
+    operation_id="Update config",
+    operation_description="Updates config and clears db and cache.",
+    responses=openapi.Responses(responses={HTTP_200_OK: openapi.Response("", serializers.UpdateConfigSerializer)}),
+    security=[{"Basic": []}],
+)
+@api_view(http_method_names=["PATCH"])
+def update_config(request, *args, **kwargs):
+    from core.soroban import soroban_service
+
+    if not (secret := settings.CONFIG_SECRET) or request.headers.get("Config-Secret") != secret:
+        return Response(status=HTTP_401_UNAUTHORIZED)
+
+    data = {
+        "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
+        "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
+        "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+        **request.data,
+    }
+    serializer = serializers.UpdateConfigSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+
+    settings.CORE_CONTRACT_ADDRESS = data["core_contract_address"]
+    settings.VOTES_CONTRACT_ADDRESS = data["votes_contract_address"]
+    settings.ASSETS_WASM_HASH = data["assets_wasm_hash"]
+    soroban_service.clear_db_and_cache()
+    soroban_service.set_trusted_contract_ids()
+    return Response(data=serializer.data, status=HTTP_200_OK)
 
 
 @method_decorator(swagger_auto_schema(operation_description="Retrieves an Account."), "retrieve")

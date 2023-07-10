@@ -14,6 +14,12 @@ class StatsSerializer(Serializer):  # noqa
     vote_count = IntegerField(min_value=0)
 
 
+class UpdateConfigSerializer(Serializer):  # noqa
+    core_contract_address = CharField(required=False)
+    votes_contract_address = CharField(required=False)
+    assets_wasm_hash = CharField(required=False)
+
+
 class ConfigSerializer(Serializer):  # noqa
     deposit_to_create_dao = IntegerField(
         min_value=0, help_text="Amount of native balance required to deposit when creating a DAO."

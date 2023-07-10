@@ -14,4 +14,5 @@ urlpatterns = router.urls + [
     path(r"", views.welcome, name="core-welcome"),
     path(r"stats/", views.stats, name="core-stats"),
     path(r"config/", views.config, name="core-config"),
+    path(r"update-config/", views.update_config, name="core-update-config"),
 ]

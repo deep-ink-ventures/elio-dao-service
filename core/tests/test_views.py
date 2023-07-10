@@ -6,6 +6,7 @@ from ddt import data, ddt
 from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
+from rest_framework.status import HTTP_200_OK
 
 from core import models
 from core.tests.testcases import IntegrationTestCase
@@ -147,6 +148,34 @@ class CoreViewSetTest(IntegrationTestCase):
             res = self.client.get(reverse("core-config"))
 
         self.assertDictEqual(res.data, expected_res)
+
+    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
+    @patch("core.soroban.SorobanService.clear_db_and_cache")
+    def test_update_config(self, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
+        expected_res = {
+            "core_contract_address": "c",
+            "votes_contract_address": "v",
+            "assets_wasm_hash": "a",
+        }
+
+        with self.assertNumQueries(0):
+            res = self.client.patch(
+                reverse("core-update-config"),
+                data={
+                    **expected_res,
+                    "not": "interesting",
+                },
+                content_type="application/json",
+                HTTP_CONFIG_SECRET="much-secure",
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertDictEqual(res.data, expected_res)
+        clear_db_and_cache_mock.assert_called_once_with()
+        set_trusted_contract_ids_mock.assert_called_once_with()
+        self.assertEqual(settings.CORE_CONTRACT_ADDRESS, "c")
+        self.assertEqual(settings.VOTES_CONTRACT_ADDRESS, "v")
+        self.assertEqual(settings.ASSETS_WASM_HASH, "a")
 
     # todo
     # def test_account_get(self):
