@@ -169,6 +169,7 @@ class SorobanService(object):
                 truncate core_account cascade;
                 """
             )
+        cache.set(key="restart_listener", value=True)
         if start_time:
             self.sleep(start_time=start_time)
 
@@ -280,24 +281,26 @@ class SorobanService(object):
         return max(events_per_block.keys()) if events_per_block else res.latest_ledger
 
     def listen(self):
-        for block in core_models.Block.objects.filter(executed=False).order_by("number"):
-            soroban_event_handler.execute_actions(block=block)
-        latest_block = core_models.Block.objects.order_by("-number").first()
-        latest_block_number = latest_block and latest_block.number + 1 or self.find_start_ledger()
         while True:
-            start_time = time.time()
-            logger.info(f"Listening... Latest block number: {latest_block_number}")
-            try:
-                latest_block_number = self.fetch_and_parse_block(start_ledger=latest_block_number)
-            except IntegrityError:
-                self.clear_db_and_cache(start_time=start_time)
-                latest_block_number = self.find_start_ledger()
-            except NoLongerAvailableException:
-                latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
-            else:
-                latest_block_number += 1
+            cache.delete("restart_listener")
+            for block in core_models.Block.objects.filter(executed=False).order_by("number"):
+                soroban_event_handler.execute_actions(block=block)
+            latest_block = core_models.Block.objects.order_by("-number").first()
+            latest_block_number = latest_block and latest_block.number + 1 or self.find_start_ledger()
+            while not cache.get("restart_listener"):
+                start_time = time.time()
+                logger.info(f"Listening... Latest block number: {latest_block_number}")
+                try:
+                    latest_block_number = self.fetch_and_parse_block(start_ledger=latest_block_number)
+                except IntegrityError:
+                    self.clear_db_and_cache(start_time=start_time)
+                    latest_block_number = self.find_start_ledger()
+                except NoLongerAvailableException:
+                    latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
+                else:
+                    latest_block_number += 1
 
-            self.sleep(start_time=start_time)
+                self.sleep(start_time=start_time)
 
 
 soroban_service = SorobanService()

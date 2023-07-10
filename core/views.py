@@ -127,6 +127,7 @@ def update_config(request, *args, **kwargs):
     settings.CORE_CONTRACT_ADDRESS = data["core_contract_address"]
     settings.VOTES_CONTRACT_ADDRESS = data["votes_contract_address"]
     settings.ASSETS_WASM_HASH = data["assets_wasm_hash"]
+    cache.set(key="restart_listener", value=True)
     soroban_service.clear_db_and_cache()
     soroban_service.set_trusted_contract_ids()
     return Response(data=serializer.data, status=HTTP_200_OK)
