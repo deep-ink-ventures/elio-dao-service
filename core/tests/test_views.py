@@ -22,7 +22,7 @@ expected_dao1_res = {
     "name": "dao1 name",
     "creator_id": "acc1",
     "owner_id": "acc1",
-    "asset_id": 1,
+    "asset_id": "1",
     "proposal_duration": 10,
     "proposal_token_deposit": 123,
     "minimum_majority_per_1024": 50,
@@ -37,7 +37,7 @@ expected_dao2_res = {
     "name": "dao2 name",
     "creator_id": "acc2",
     "owner_id": "acc2",
-    "asset_id": 2,
+    "asset_id": "2",
     "proposal_duration": 15,
     "proposal_token_deposit": 234,
     "minimum_majority_per_1024": 45,
@@ -324,7 +324,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
-                    "asset_id": 4,
+                    "asset_id": "4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "minimum_majority_per_1024": None,
@@ -340,7 +340,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
-                    "asset_id": 3,
+                    "asset_id": "3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "minimum_majority_per_1024": None,
@@ -362,7 +362,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
-                    "asset_id": 4,
+                    "asset_id": "4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "minimum_majority_per_1024": None,
@@ -377,7 +377,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
-                    "asset_id": 3,
+                    "asset_id": "3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "minimum_majority_per_1024": None,
@@ -401,7 +401,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
-                    "asset_id": 4,
+                    "asset_id": "4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "minimum_majority_per_1024": None,
@@ -417,7 +417,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
-                    "asset_id": 3,
+                    "asset_id": "3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "minimum_majority_per_1024": None,
@@ -438,10 +438,10 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Dao.objects.create(
             id="dao4", contract_id="contract4", name="dao4 name", creator_id="acc2", owner_id="acc2"
         )
-        models.Asset.objects.create(id=3, owner_id="acc1", dao_id="dao3", total_supply=100)
-        models.Asset.objects.create(id=4, owner_id="acc2", dao_id="dao4", total_supply=200)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=100)
-        models.AssetHolding.objects.create(asset_id=4, owner_id="acc3", balance=200)
+        models.Asset.objects.create(id="3", owner_id="acc1", dao_id="dao3", total_supply=100)
+        models.Asset.objects.create(id="4", owner_id="acc2", dao_id="dao4", total_supply=200)
+        models.AssetHolding.objects.create(asset_id="3", owner_id="acc3", balance=100)
+        models.AssetHolding.objects.create(asset_id="4", owner_id="acc3", balance=200)
 
         expected_res = wrap_in_pagination_res(expected_res)
 

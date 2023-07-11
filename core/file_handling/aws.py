@@ -52,9 +52,6 @@ class S3Client:
         Args:
             storage_destination: e.g.: 'folder1/'
 
-        Returns:
-            None
-
         deletes file from s3
         """
         try:

@@ -56,6 +56,25 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Account.objects.order_by("address"), expected_accs)
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
+    def test__delete_daos(self):
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc1")
+        event_data = {
+            "contract1": [
+                {"dao_id": "dao1", "not": "interesting"},
+            ],
+            "contract2": [
+                {"dao_id": "dao2", "not": "interesting"},
+            ],
+        }
+        expected_daos = [
+            models.Dao(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc1"),
+        ]
+
+        with self.assertNumQueries(5):
+            soroban_event_handler._delete_daos(event_data=event_data)
+
+        self.assertModelsEqual(models.Dao.objects.all(), expected_daos)
+
     def test__transfer_dao_ownerships(self):
         models.Account.objects.create(address="acc3")
         models.Dao.objects.create(
@@ -110,25 +129,6 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
         self.assertModelsEqual(models.Account.objects.order_by("address"), expected_accounts)
 
-    def test__delete_daos(self):
-        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc1")
-        event_data = {
-            "contract1": [
-                {"dao_id": "dao1", "not": "interesting"},
-            ],
-            "contract2": [
-                {"dao_id": "dao2", "not": "interesting"},
-            ],
-        }
-        expected_daos = [
-            models.Dao(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc1"),
-        ]
-
-        with self.assertNumQueries(5):
-            soroban_event_handler._delete_daos(event_data=event_data)
-
-        self.assertModelsEqual(models.Dao.objects.all(), expected_daos)
-
     def test__create_assets(self):
         event_data = {
             "contract1": [
@@ -181,22 +181,58 @@ class EventHandlerTest(IntegrationTestCase):
             models.AssetHolding.objects.all(), expected_asset_holdings, ignore_fields=("id", "created_at", "updated_at")
         )
 
+    def test__mint_tokens(self):
+        models.Account.objects.create(address="acc3")
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
+        models.Asset.objects.create(id="1", total_supply=0, owner_id="acc1", dao_id="dao1")
+        models.Asset.objects.create(id="2", total_supply=0, owner_id="acc2", dao_id="dao2")
+        models.Asset.objects.create(id="3", total_supply=0, owner_id="acc3", dao_id="dao3")
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=0)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=0)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=0)
+        event_data = {
+            "1": [{"owner_id": "acc1", "amount": 123}],
+            "2": [{"owner_id": "acc2", "amount": 234}],
+        }
+        expected_assets = [
+            models.Asset(id="1", total_supply=123, owner_id="acc1", dao_id="dao1"),
+            models.Asset(id="2", total_supply=234, owner_id="acc2", dao_id="dao2"),
+            models.Asset(id="3", total_supply=0, owner_id="acc3", dao_id="dao3"),
+        ]
+        expected_asset_holdings = [
+            models.AssetHolding(asset_id="1", owner_id="acc1", balance=123),
+            models.AssetHolding(asset_id="2", owner_id="acc2", balance=234),
+            models.AssetHolding(asset_id="3", owner_id="acc3", balance=0),
+        ]
+
+        with self.assertNumQueries(4):
+            soroban_event_handler._mint_tokens(event_data=event_data)
+
+        self.assertModelsEqual(
+            models.Asset.objects.order_by("id").all(), expected_assets, ignore_fields=["created_at", "updated_at"]
+        )
+        self.assertModelsEqual(
+            models.AssetHolding.objects.order_by("asset_id").all(),
+            expected_asset_holdings,
+            ignore_fields=["id", "created_at", "updated_at"],
+        )
+
     def test__transfer_assets(self):
         models.Account.objects.create(address="acc3")
         self.contr3 = models.Contract.objects.create(id="contract4")
         models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
         models.Dao.objects.create(id="dao4", contract_id="contract4", name="dao4 name", owner_id="acc3")
-        models.Asset.objects.create(id="1", total_supply=150, owner_id="acc1", dao_id="dao1"),
-        models.Asset.objects.create(id="2", total_supply=250, owner_id="acc2", dao_id="dao2"),
-        models.Asset.objects.create(id="3", total_supply=300, owner_id="acc3", dao_id="dao3"),
-        models.Asset.objects.create(id="4", total_supply=400, owner_id="acc3", dao_id="dao4"),
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=100),
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=50),
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=200),
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50),
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50),
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=300),
-        models.AssetHolding.objects.create(asset_id=4, owner_id="acc3", balance=400),
+        models.Asset.objects.create(id="1", total_supply=150, owner_id="acc1", dao_id="dao1")
+        models.Asset.objects.create(id="2", total_supply=250, owner_id="acc2", dao_id="dao2")
+        models.Asset.objects.create(id="3", total_supply=300, owner_id="acc3", dao_id="dao3")
+        models.Asset.objects.create(id="4", total_supply=400, owner_id="acc3", dao_id="dao4")
+        models.AssetHolding.objects.create(asset_id="1", owner_id="acc1", balance=100)
+        models.AssetHolding.objects.create(asset_id="1", owner_id="acc3", balance=50)
+        models.AssetHolding.objects.create(asset_id="2", owner_id="acc2", balance=200)
+        models.AssetHolding.objects.create(asset_id="2", owner_id="acc3", balance=50)
+        models.AssetHolding.objects.create(asset_id="3", owner_id="acc2", balance=50)
+        models.AssetHolding.objects.create(asset_id="3", owner_id="acc3", balance=300)
+        models.AssetHolding.objects.create(asset_id="4", owner_id="acc3", balance=400)
         transfers = [
             {"amount": 10, "owner_id": "acc1", "new_owner_id": "acc2", "not": "interesting"},
             {"amount": 15, "owner_id": "acc1", "new_owner_id": "acc2", "not": "interesting"},
@@ -444,71 +480,70 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.assert_not_called()
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
-    # todo
-    # def test__dao_set_governance(self):
-    #     models.Account.objects.create(address="acc1")
-    #     models.Account.objects.create(address="acc2")
-    #     models.Account.objects.create(address="acc3")
-    #     models.Dao.objects.create(id="dao1", name="dao1 name", owner_id="acc1")
-    #     models.Dao.objects.create(id="dao2", name="dao2 name", owner_id="acc2")
-    #     models.Dao.objects.create(id="dao3", name="dao3 name", owner_id="acc3")
-    #
-    #     block = models.Block.objects.create(
-    #         hash="hash 0",
-    #         number=0,
-    #         extrinsic_data={
-    #             "not": "interesting",
-    #         },
-    #         event_data={
-    #             "not": "interesting",
-    #             "Votes": {
-    #                 "SetGovernanceMajorityVote": [
-    #                     {
-    #                         "dao_id": "dao1",
-    #                         "proposal_duration": 1,
-    #                         "proposal_token_deposit": 2,
-    #                         "minimum_majority_per_1024": 3,
-    #                     },
-    #                     {
-    #                         "dao_id": "dao2",
-    #                         "proposal_duration": 4,
-    #                         "proposal_token_deposit": 5,
-    #                         "minimum_majority_per_1024": 6,
-    #                     },
-    #                 ]
-    #             },
-    #         },
-    #     )
-    #     expected_governances = [
-    #         models.Governance(
-    #             dao_id="dao1",
-    #             proposal_duration=1,
-    #             proposal_token_deposit=2,
-    #             minimum_majority=3,
-    #             type=models.GovernanceType.MAJORITY_VOTE,
-    #         ),
-    #         models.Governance(
-    #             dao_id="dao2",
-    #             proposal_duration=4,
-    #             proposal_token_deposit=5,
-    #             minimum_majority=6,
-    #             type=models.GovernanceType.MAJORITY_VOTE,
-    #         ),
-    #     ]
-    #
-    #     with self.assertNumQueries(2):
-    #         soroban_event_handler._dao_set_governances(block)
-    #
-    #     created_governances = models.Governance.objects.order_by("dao_id")
-    #     self.assertModelsEqual(
-    #         created_governances, expected_governances, ignore_fields=["id", "created_at", "updated_at"]
-    #     )
-    #     expected_daos = [
-    #         models.Dao(id="dao1", name="dao1 name", owner_id="acc1", governance=created_governances[0]),
-    #         models.Dao(id="dao2", name="dao2 name", owner_id="acc2", governance=created_governances[1]),
-    #         models.Dao(id="dao3", name="dao3 name", owner_id="acc3", governance=None),
-    #     ]
-    #     self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
+    def test__dao_set_governance(self):
+        models.Account.objects.create(address="acc3")
+        models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
+
+        event_data = {
+            "c1": [
+                {
+                    "dao_id": "dao1",
+                    "proposal_duration": 1,
+                    "proposal_token_deposit": 2,
+                    "proposal_voting_type": ["MAJORITY"],
+                },
+                {
+                    "dao_id": "dao2",
+                    "proposal_duration": 4,
+                    "proposal_token_deposit": 5,
+                    "proposal_voting_type": ["MAJORITY"],
+                },
+            ]
+        }
+        expected_governances = [
+            models.Governance(
+                dao_id="dao1",
+                proposal_duration=1,
+                proposal_token_deposit=2,
+                minimum_majority=0,
+                type=models.GovernanceType.MAJORITY_VOTE,
+            ),
+            models.Governance(
+                dao_id="dao2",
+                proposal_duration=4,
+                proposal_token_deposit=5,
+                minimum_majority=0,
+                type=models.GovernanceType.MAJORITY_VOTE,
+            ),
+        ]
+
+        with self.assertNumQueries(2):
+            soroban_event_handler._dao_set_governances(event_data=event_data)
+
+        created_governances = models.Governance.objects.order_by("dao_id")
+        self.assertModelsEqual(
+            created_governances, expected_governances, ignore_fields=["id", "created_at", "updated_at"]
+        )
+        expected_daos = [
+            models.Dao(
+                id="dao1",
+                contract_id="contract1",
+                creator_id="acc1",
+                name="dao1 name",
+                owner_id="acc1",
+                governance=created_governances[0],
+            ),
+            models.Dao(
+                id="dao2",
+                contract_id="contract2",
+                creator_id="acc2",
+                name="dao2 name",
+                owner_id="acc2",
+                governance=created_governances[1],
+            ),
+            models.Dao(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3", governance=None),
+        ]
+        self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     def test__create_proposals(self):
         models.Account.objects.create(address="acc3")
@@ -872,37 +907,76 @@ class EventHandlerTest(IntegrationTestCase):
 
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
+    def test_no_items(self):
+        funcs = (
+            soroban_event_handler._create_daos,
+            soroban_event_handler._delete_daos,
+            soroban_event_handler._transfer_dao_ownerships,
+            soroban_event_handler._set_dao_metadata,
+            soroban_event_handler._create_assets,
+            soroban_event_handler._mint_tokens,
+            soroban_event_handler._transfer_assets,
+            soroban_event_handler._dao_set_governances,
+            soroban_event_handler._create_proposals,
+            soroban_event_handler._set_proposal_metadata,
+            soroban_event_handler._register_votes,
+            soroban_event_handler._update_proposal_status,
+            soroban_event_handler._fault_proposals,
+        )
+        for func in funcs:
+            with self.assertNumQueries(0):
+                func(event_data={}, block=None)
+
     @patch("core.event_handler.SorobanEventHandler._create_daos")
-    @patch("core.event_handler.SorobanEventHandler._transfer_dao_ownerships")
     @patch("core.event_handler.SorobanEventHandler._delete_daos")
+    @patch("core.event_handler.SorobanEventHandler._transfer_dao_ownerships")
     @patch("core.event_handler.SorobanEventHandler._set_dao_metadata")
     @patch("core.event_handler.SorobanEventHandler._create_assets")
+    @patch("core.event_handler.SorobanEventHandler._mint_tokens")
+    @patch("core.event_handler.SorobanEventHandler._transfer_assets")
+    @patch("core.event_handler.SorobanEventHandler._dao_set_governances")
+    @patch("core.event_handler.SorobanEventHandler._create_proposals")
+    @patch("core.event_handler.SorobanEventHandler._set_proposal_metadata")
+    @patch("core.event_handler.SorobanEventHandler._register_votes")
+    @patch("core.event_handler.SorobanEventHandler._update_proposal_status")
+    @patch("core.event_handler.SorobanEventHandler._fault_proposals")
     @patch("core.event_handler.logger")
-    # @patch("core.event_handler.SorobanEventHandler._transfer_assets")
-    # @patch("core.event_handler.SorobanEventHandler._dao_set_governances")
-    # @patch("core.event_handler.SorobanEventHandler._create_proposals")
-    # @patch("core.event_handler.SorobanEventHandler._register_votes")
-    # @patch("core.event_handler.SorobanEventHandler._finalize_proposals")
-    # @patch("core.event_handler.SorobanEventHandler._fault_proposals")
     @data(
-        # event_data, expected calls
-        ([["c1", "e1", ["DAO", "created"], {"d": 1}]], [("_create_daos", {"c1": [{"d": 1}]})]),
-        ([["c1", "e1", ["DAO", "destroyed"], {"d": 1}]], [("_delete_daos", {"c1": [{"d": 1}]})]),
-        ([["c1", "e1", ["DAO", "new_owner"], {"d": 1}]], [("_transfer_dao_ownerships", {"c1": [{"d": 1}]})]),
-        ([["c1", "e1", ["DAO", "meta_set"], {"d": 1}]], [("_set_dao_metadata", {"c1": [{"d": 1}]})]),
-        ([["c1", "e1", ["ASSET", "created"], {"d": 1}]], [("_create_assets", {"c1": [{"d": 1}]})]),
+        # topics, expected func call
+        (["DAO", "created"], "_create_daos"),
+        (["DAO", "destroyed"], "_delete_daos"),
+        (["DAO", "new_owner"], "_transfer_dao_ownerships"),
+        (["DAO", "meta_set"], "_set_dao_metadata"),
+        (["ASSET", "created"], "_create_assets"),
+        (["ASSET", "minted"], "_mint_tokens"),
+        (["ASSET", "transfer"], "_transfer_assets"),
+        (["PROPOSAL", "conf_set"], "_dao_set_governances"),
+        (["PROPOSAL", "created"], "_create_proposals"),
+        (["PROPOSAL", "meta_set"], "_set_proposal_metadata"),
+        (["PROPOSAL", "vote_cast"], "_register_votes"),
+        (["PROPOSAL", "state_upd"], "_update_proposal_status"),
+        (["PROPOSAL", "faulted"], "_fault_proposals"),
     )
     def test_execute_actions(
         self,
         case,
         logger_mock,
+        fault_proposals_mock,
+        update_proposal_status_mock,
+        register_votes_mock,
+        set_proposal_metadata_mock,
+        create_proposals_mock,
+        dao_set_governances_mock,
+        transfer_assets_mock,
+        mint_tokens_mock,
         create_assets_mock,
         set_dao_metadata_mock,
-        delete_daos_mock,
         transfer_dao_ownerships_mock,
+        delete_daos_mock,
         create_daos_mock,
     ):
-        event_data, expected_calls = case
+        topics, expected_func_call = case
+        event_data = [["c1", "e1", topics, {"d": 1}]]
         block = models.Block.objects.create(number=0, event_data=event_data)
         func_to_mock = {
             "_create_daos": create_daos_mock,
@@ -910,6 +984,14 @@ class EventHandlerTest(IntegrationTestCase):
             "_delete_daos": delete_daos_mock,
             "_set_dao_metadata": set_dao_metadata_mock,
             "_create_assets": create_assets_mock,
+            "_mint_tokens": mint_tokens_mock,
+            "_transfer_assets": transfer_assets_mock,
+            "_dao_set_governances": dao_set_governances_mock,
+            "_create_proposals": create_proposals_mock,
+            "_set_proposal_metadata": set_proposal_metadata_mock,
+            "_register_votes": register_votes_mock,
+            "_update_proposal_status": update_proposal_status_mock,
+            "_fault_proposals": fault_proposals_mock,
         }
 
         with self.assertNumQueries(3):
@@ -920,9 +1002,8 @@ class EventHandlerTest(IntegrationTestCase):
             call("Executing event_data... Block number: 0"),
             call(f"Contract ID: {contract_id} | Event ID: {event_id} | Topics: {topics} | Values: {vals}"),
         )
-        for expected_call in expected_calls:
-            func, args = expected_call
-            func_to_mock.pop(func).assert_called_once_with(event_data=args, block=block)
+        args = {"c1": [{"d": 1}]}
+        func_to_mock.pop(expected_func_call).assert_called_once_with(event_data=args, block=block)
         for mock in func_to_mock.values():
             mock.assert_not_called()
         block.refresh_from_db()
@@ -945,7 +1026,7 @@ class EventHandlerTest(IntegrationTestCase):
 
     @patch("core.event_handler.logger")
     @patch("core.event_handler.SorobanEventHandler._delete_daos")
-    def test_execute_actions_expected_error(self, action_mock, logger_mock):
+    def test_execute_actions_unexpected_error(self, action_mock, logger_mock):
         block = models.Block.objects.create(number=0, event_data=[["c1", "e1", ["DAO", "destroyed"], {"d": 1}]])
         action_mock.side_effect = Exception
 
@@ -956,3 +1037,17 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertFalse(block.executed)
         action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
         logger_mock.exception.assert_called_once_with("Unexpected error during block execution. Block number: 0.")
+
+    @patch("core.event_handler.logger")
+    def test_execute_actions_not_implemented(self, logger_mock):
+        block = models.Block.objects.create(number=0, event_data=[["c1", "e1", ["DAO", "crangled"], {"d": 1}]])
+
+        with self.assertNumQueries(3):
+            SorobanEventHandler().execute_actions(block)
+
+        block.refresh_from_db()
+        self.assertTrue(block.executed)
+        logger_mock.error.assert_called_once_with(
+            "NotImplementedError during block execution. Block number: 0. "
+            "No action defined for topics: ('DAO', 'crangled')."
+        )

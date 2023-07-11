@@ -47,9 +47,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         creates Daos based on event data
         """
         daos = []
@@ -76,9 +73,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         deletes Daos based on event data
         """
         if dao_ids := [values["dao_id"] for values in chain(*event_data.values())]:
@@ -89,9 +83,6 @@ class SorobanEventHandler:
         """
         Args:
             event_data: event input values by contract_id
-
-        Returns:
-            None
 
         transfers ownerships of a Daos to new Accounts based on event data
         """
@@ -113,9 +104,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         updates Daos' metadata_url and metadata_hash based on event data
         """
         if dao_metadata := {
@@ -130,9 +118,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         creates Assets based on event data
         """
         from core.soroban import soroban_service
@@ -140,7 +125,6 @@ class SorobanEventHandler:
         # create Assets and assign to Daos
         assets = []
         asset_holdings = []
-        # todo clarify if we still need governance_id
         for values in chain(*event_data.values()):
             asset_id, owner_id, dao_id = (
                 values["asset_id"],
@@ -168,21 +152,16 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         sets Assets and Asset Holdings total_supply / (initial) balance based on event data
         """
         # there is only one data entry (amount, owner_id) per asset
         data = {asset_id: data[0] for asset_id, data in event_data.items()}
         for asset in (assets := models.Asset.objects.filter(id__in=data.keys())):
             asset.total_supply = data[asset.id]["amount"]
-            asset.holdings.get()
 
         for asset_holding in (asset_holdings := models.AssetHolding.objects.filter(asset_id__in=data.keys())):
             asset_holding_data = data[asset_holding.asset_id]
-            if asset_holding.owner_id == asset_holding_data["owner_id"]:
-                asset_holding.balance = asset_holding_data["amount"]
+            asset_holding.balance = asset_holding_data["amount"]
 
         if assets:
             models.Asset.objects.bulk_update(assets, ["total_supply"])
@@ -194,9 +173,6 @@ class SorobanEventHandler:
         """
         Args:
             event_data: event input values by contract_id
-
-        Returns:
-            None
 
         transfers Assets based on event data
         rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
@@ -259,9 +235,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         updates Daos' governance based on event data
         """
         governances = []
@@ -288,9 +261,6 @@ class SorobanEventHandler:
         Args:
             event_data: event input values by contract_id
             block: Block the events were extracted from
-
-        Returns:
-            None
 
         create Proposals based on event data
         """
@@ -350,9 +320,6 @@ class SorobanEventHandler:
          Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         set Proposals' metadata based on event data
         """
         if proposal_data := {
@@ -368,9 +335,6 @@ class SorobanEventHandler:
         """
          Args:
             event_data: event input values by contract_id
-
-        Returns:
-            None
 
         register Votes based on event data
         """
@@ -403,9 +367,6 @@ class SorobanEventHandler:
          Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         updates Proposals status based on event data
         """
         proposal_id_to_status = {}
@@ -426,9 +387,6 @@ class SorobanEventHandler:
          Args:
             event_data: event input values by contract_id
 
-        Returns:
-            None
-
         faults Proposals' based on event data
         """
         if faulted_proposals := {
@@ -437,17 +395,13 @@ class SorobanEventHandler:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=faulted_proposals.keys())):
                 proposal.fault = faulted_proposals[proposal.id]
                 proposal.status = models.ProposalStatus.FAULTED
-            if proposals:
-                models.Proposal.objects.bulk_update(proposals, ("fault", "status"))
+            models.Proposal.objects.bulk_update(proposals, ("fault", "status"))
 
     @transaction.atomic
     def execute_actions(self, block: models.Block):
         """
         Args:
              block: Block to execute
-
-         Returns:
-             None
 
          alters db's blockchain representation based on the Block's event data
         """

@@ -56,7 +56,7 @@ class AccountSerializerList(ModelSerializer):
 
 class DaoSerializer(ModelSerializer):
     owner_id = CharField(required=True)
-    asset_id = IntegerField(source="asset.id", required=False)
+    asset_id = CharField(source="asset.id", required=False)
     proposal_duration = IntegerField(source="governance.proposal_duration", help_text="Proposal duration in blocks.")
     proposal_token_deposit = IntegerField(
         source="governance.proposal_token_deposit", help_text="Token deposit required to create a Poposal"

@@ -18,9 +18,6 @@ class IntegrationTestCase(test.TestCase):
             obj_2: model instance 2
             ignore_fields: fields to ignore during comparison
 
-        Returns:
-            None
-
         Raises:
             self.failureException
 
@@ -49,9 +46,6 @@ class IntegrationTestCase(test.TestCase):
             col_1: sorted! collection of Model instances
             col_2: sorted! collection of Model instances
             ignore_fields: fields to ignore during comparison
-
-        Returns:
-            None
 
         Raises:
             self.failureException

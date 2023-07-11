@@ -144,9 +144,6 @@ class SorobanService(object):
         Args:
             start_time: start time
 
-        Returns:
-            None
-
         ensure at least BLOCK_CREATION_INTERVAL sleep time
         """
         elapsed_time = time.time() - start_time
