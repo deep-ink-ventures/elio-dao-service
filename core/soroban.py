@@ -231,17 +231,19 @@ class SorobanService(object):
     def get_events_filters(self):
         """
         creates list of EventFilters for soroban.get_events
+        each contains up to 5 contract IDs
 
         Returns:
             List of EventFilters
         """
+        trusted_contract_ids = list(
+            filter(None, cache.get(key="trusted_contract_ids") or self.set_trusted_contract_ids())
+        )
         return [
-            EventFilter(
-                contractIds=list(filter(None, cache.get(key="trusted_contract_ids") or self.set_trusted_contract_ids()))
-            )
+            EventFilter(contractIds=trusted_contract_ids[i : i + 5]) for i in range(0, len(trusted_contract_ids), 5)
         ]
 
-    def fetch_and_parse_block(self, start_ledger: int) -> Optional[int]:
+    def fetch_event_data(self, start_ledger: int) -> Optional[int]:
         """
         Args:
             start_ledger: (inclusive) block number to start fetching event_data for
@@ -252,22 +254,27 @@ class SorobanService(object):
         fetches event_data from chain starting from "start_ledger" (inclusive),
         sorts event_data by block number and creates one block for each, storing all it's event data.
         """
-        res = retry("fetching event data")(self.soroban.get_events)(
-            start_ledger=start_ledger, filters=self.get_events_filters(), limit=10000
-        )
-        # parse event data
         contract_ids = set()
         events_per_block: DefaultDict[int, list] = defaultdict(list)
-        for event in res.events:
-            contract_ids.add(event.contract_id)
-            events_per_block[event.ledger].append(
-                (
-                    event.contract_id,
-                    event.id,
-                    [unpack_scval(SCVal.from_xdr(topic)) for topic in event.topic],
-                    unpack_scval(SCVal.from_xdr(event.value.xdr)),
-                )
+        latest_ledger = 0
+        for i in range(0, len(filters := self.get_events_filters()), 5):
+            # 1 request with up to 5 filter each containing up to 5 contract IDs
+            res = retry("fetching event data")(self.soroban.get_events)(
+                start_ledger=start_ledger, filters=filters[i : i + 5], limit=10000
             )
+            latest_ledger = max(latest_ledger, res.latest_ledger)
+            # parse event data
+            for event in res.events:
+                contract_ids.add(event.contract_id)
+                events_per_block[event.ledger].append(
+                    (
+                        event.contract_id,
+                        event.id,
+                        [unpack_scval(SCVal.from_xdr(topic)) for topic in event.topic],
+                        unpack_scval(SCVal.from_xdr(event.value.xdr)),
+                    )
+                )
+
         core_models.Contract.objects.bulk_create(
             [core_models.Contract(id=contract_id) for contract_id in contract_ids], ignore_conflicts=True
         )
@@ -275,7 +282,7 @@ class SorobanService(object):
             core_models.Block(number=ledger, event_data=event_data) for ledger, event_data in events_per_block.items()
         ):
             soroban_event_handler.execute_actions(block=block)
-        return max(events_per_block.keys()) if events_per_block else res.latest_ledger
+        return max(events_per_block.keys()) if events_per_block else latest_ledger
 
     def listen(self):
         while True:
@@ -288,7 +295,7 @@ class SorobanService(object):
                 start_time = time.time()
                 logger.info(f"Listening... Latest block number: {latest_block_number}")
                 try:
-                    latest_block_number = self.fetch_and_parse_block(start_ledger=latest_block_number)
+                    latest_block_number = self.fetch_event_data(start_ledger=latest_block_number)
                 except IntegrityError:
                     self.clear_db_and_cache(start_time=start_time)
                     latest_block_number = self.find_start_ledger()
