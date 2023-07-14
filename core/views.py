@@ -21,6 +21,7 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from core import models, serializers
 from core.file_handling.file_handler import file_handler
 from core.view_utils import (
+    IsDAOOwner,
     IsProposalCreator,
     IsTokenHolder,
     MultiQsLimitOffsetPagination,
@@ -230,8 +231,7 @@ class DaoViewSet(ReadOnlyModelViewSet, SearchableMixin):
         methods=["POST"],
         detail=True,
         url_path="metadata",
-        #  todo
-        # permission_classes=[IsDAOOwner],
+        permission_classes=[IsDAOOwner],
         authentication_classes=[],
     )
     def add_metadata(self, request, *args, **kwargs):

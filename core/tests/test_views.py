@@ -1,12 +1,22 @@
+import base64
 import secrets
 from collections.abc import Collection
+
+# todo from functools import partial
 from unittest.mock import PropertyMock, patch
 
 from ddt import data, ddt
 from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
-from rest_framework.status import HTTP_200_OK
+from rest_framework.exceptions import ErrorDetail
+from rest_framework.status import (  # todo HTTP_403_FORBIDDEN,
+    HTTP_200_OK,
+    HTTP_201_CREATED,
+    HTTP_400_BAD_REQUEST,
+    HTTP_401_UNAUTHORIZED,
+)
+from stellar_sdk import Keypair
 
 from core import models
 from core.tests.testcases import IntegrationTestCase
@@ -176,6 +186,39 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertEqual(settings.CORE_CONTRACT_ADDRESS, "c")
         self.assertEqual(settings.VOTES_CONTRACT_ADDRESS, "v")
         self.assertEqual(settings.ASSETS_WASM_HASH, "a")
+
+    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
+    @patch("core.soroban.SorobanService.clear_db_and_cache")
+    def test_update_config_401(self, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
+        initial_values = {
+            "CORE_CONTRACT_ADDRESS": settings.CORE_CONTRACT_ADDRESS,
+            "VOTES_CONTRACT_ADDRESS": settings.VOTES_CONTRACT_ADDRESS,
+            "ASSETS_WASM_HASH": settings.ASSETS_WASM_HASH,
+        }
+        input_data = {
+            "core_contract_address": "c",
+            "votes_contract_address": "v",
+            "assets_wasm_hash": "a",
+        }
+
+        with self.assertNumQueries(0):
+            res = self.client.patch(
+                reverse("core-update-config"),
+                data={
+                    **input_data,
+                    "not": "interesting",
+                },
+                content_type="application/json",
+                HTTP_CONFIG_SECRET="wrong",
+            )
+
+        self.assertEqual(res.status_code, HTTP_401_UNAUTHORIZED)
+        self.assertIsNone(res.data)
+        clear_db_and_cache_mock.assert_not_called()
+        set_trusted_contract_ids_mock.assert_not_called()
+        self.assertEqual(settings.CORE_CONTRACT_ADDRESS, initial_values["CORE_CONTRACT_ADDRESS"])
+        self.assertEqual(settings.VOTES_CONTRACT_ADDRESS, initial_values["VOTES_CONTRACT_ADDRESS"])
+        self.assertEqual(settings.ASSETS_WASM_HASH, initial_values["ASSETS_WASM_HASH"])
 
     # todo
     # def test_account_get(self):
@@ -465,108 +508,105 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.data["challenge"], cache.get("acc1"))
 
-    # todo
-    # def test_dao_add_metadata(self):
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-    #     cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     acc = models.Account.objects.create(address=keypair.ss58_address)
-    #     models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
-    #
-    #     with open("core/tests/test_file.jpeg", "rb") as f:
-    #         post_data = {
-    #             "email": "some@email.com",
-    #             "description_short": "short description",
-    #             "description_long": "long description",
-    #             "logo": base64.b64encode(f.read()).decode(),
-    #         }
-    #     expected_res = {
-    #         "metadata": {
-    #             "description_short": "short description",
-    #             "description_long": "long description",
-    #             "email": "some@email.com",
-    #             "images": {
-    #                 "logo": {
-    #                     "content_type": "image/jpeg",
-    #                     "large": {"url": "https://some_storage.some_region.com/DAO1/logo_large.jpeg"},
-    #                     "medium": {"url": "https://some_storage.some_region.com/DAO1/logo_medium.jpeg"},
-    #                     "small": {"url": "https://some_storage.some_region.com/DAO1/logo_small.jpeg"},
-    #                 }
-    #             },
-    #         },
-    #         "metadata_hash": "a1a0591662255e72aba330746eee9a50815d4580efaf3e60aa687c7ac12d473d",
-    #         "metadata_url": "https://some_storage.some_region.com/DAO1/metadata.json",
-    #     }
-    #
-    #     res = self.client.post(
-    #         reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
-    #         post_data,
-    #         content_type="application/json",
-    #         HTTP_SIGNATURE=signature,
-    #     )
-    #
-    #     self.assertEqual(res.status_code, HTTP_201_CREATED)
-    #     self.assertDictEqual(res.data, expected_res)
+    def test_dao_add_metadata(self):
+        keypair = Keypair.random()
+        cache.set(key=keypair.public_key, value=self.challenge_key, timeout=5)
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        acc = models.Account.objects.create(address=keypair.public_key)
+        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
 
-    # todo
-    # def test_dao_add_metadata_invalid_image_file(self):
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-    #     cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     acc = models.Account.objects.create(address=keypair.ss58_address)
-    #     models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
-    #
-    #     post_data = {
-    #         "email": "some@email.com",
-    #         "description_short": "short description",
-    #         "description_long": "long description",
-    #         "logo": base64.b64encode(b"not an image").decode(),
-    #     }
-    #     res = self.client.post(
-    #         reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
-    #         post_data,
-    #         content_type="application/json",
-    #         HTTP_SIGNATURE=signature,
-    #     )
-    #
-    #     self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
-    #     self.assertDictEqual(
-    #         res.data,
-    #         {
-    #             "logo": [
-    #                 ErrorDetail(
-    #                     string="Invalid image file. Allowed image types are: jpeg, jpg, png, gif.", code="invalid"
-    #                 )
-    #             ]
-    #         },
-    #     )
+        with open("core/tests/test_file.jpeg", "rb") as f:
+            post_data = {
+                "email": "some@email.com",
+                "description_short": "short description",
+                "description_long": "long description",
+                "logo": base64.b64encode(f.read()).decode(),
+            }
+        expected_res = {
+            "metadata": {
+                "description_short": "short description",
+                "description_long": "long description",
+                "email": "some@email.com",
+                "images": {
+                    "logo": {
+                        "content_type": "image/jpeg",
+                        "large": {"url": "https://some_storage.some_region.com/DAO1/logo_large.jpeg"},
+                        "medium": {"url": "https://some_storage.some_region.com/DAO1/logo_medium.jpeg"},
+                        "small": {"url": "https://some_storage.some_region.com/DAO1/logo_small.jpeg"},
+                    }
+                },
+            },
+            "metadata_hash": "a1a0591662255e72aba330746eee9a50815d4580efaf3e60aa687c7ac12d473d",
+            "metadata_url": "https://some_storage.some_region.com/DAO1/metadata.json",
+        }
 
-    # todo
-    # def test_dao_add_metadata_logo_too_big(self):
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-    #     cache.set(key=keypair.ss58_address, value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     acc = models.Account.objects.create(address=keypair.ss58_address)
-    #     models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
-    #
-    #     with open("core/tests/test_file_5mb.jpeg", "rb") as f:
-    #         post_data = {
-    #             "email": "some@email.com",
-    #             "description_short": "short description",
-    #             "description_long": "long description",
-    #             "logo": base64.b64encode(f.read()).decode(),
-    #         }
-    #     res = self.client.post(
-    #         reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
-    #         post_data,
-    #         content_type="application/json",
-    #         HTTP_SIGNATURE=signature,
-    #     )
-    #
-    #     self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
-    #     self.assertDictEqual(
-    # noqa         res.data, {"logo": [ErrorDetail(string="The uploaded file is too big. Max size: 2.0 mb.", code="invalid")]}
-    #     )
+        res = self.client.post(
+            reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
+            post_data,
+            content_type="application/json",
+            HTTP_SIGNATURE=signature,
+        )
+
+        self.assertEqual(res.status_code, HTTP_201_CREATED)
+        self.assertDictEqual(res.data, expected_res)
+
+    def test_dao_add_metadata_invalid_image_file(self):
+        keypair = Keypair.random()
+        cache.set(key=keypair.public_key, value=self.challenge_key, timeout=5)
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        acc = models.Account.objects.create(address=keypair.public_key)
+        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
+
+        post_data = {
+            "email": "some@email.com",
+            "description_short": "short description",
+            "description_long": "long description",
+            "logo": base64.b64encode(b"not an image").decode(),
+        }
+        res = self.client.post(
+            reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
+            post_data,
+            content_type="application/json",
+            HTTP_SIGNATURE=signature,
+        )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
+        self.assertDictEqual(
+            res.data,
+            {
+                "logo": [
+                    ErrorDetail(
+                        string="Invalid image file. Allowed image types are: jpeg, jpg, png, gif.", code="invalid"
+                    )
+                ]
+            },
+        )
+
+    def test_dao_add_metadata_logo_too_big(self):
+        keypair = Keypair.random()
+        cache.set(key=keypair.public_key, value=self.challenge_key, timeout=5)
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        acc = models.Account.objects.create(address=keypair.public_key)
+        models.Dao.objects.create(id="DAO1", contract_id="contract1", name="dao1 name", owner=acc)
+
+        with open("core/tests/test_file_5mb.jpeg", "rb") as f:
+            post_data = {
+                "email": "some@email.com",
+                "description_short": "short description",
+                "description_long": "long description",
+                "logo": base64.b64encode(f.read()).decode(),
+            }
+        res = self.client.post(
+            reverse("core-dao-add-metadata", kwargs={"pk": "DAO1"}),
+            post_data,
+            content_type="application/json",
+            HTTP_SIGNATURE=signature,
+        )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST)
+        self.assertDictEqual(
+            res.data, {"logo": [ErrorDetail(string="The uploaded file is too big. Max size: 2.0 mb.", code="invalid")]}
+        )
 
     # todo
     # def test_dao_add_metadata_403(self):
@@ -672,9 +712,9 @@ class CoreViewSetTest(IntegrationTestCase):
 
     # todo
     # def test_proposal_add_metadata(self):
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     acc = models.Account.objects.create(address=keypair.ss58_address)
+    #     keypair = Keypair.random()
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+    #     acc = models.Account.objects.create(address=keypair.public_key)
     #     models.Proposal.objects.create(id="PROP1", dao_id="dao1", creator=acc, birth_block_number=10)
     #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
     #
@@ -731,10 +771,10 @@ class CoreViewSetTest(IntegrationTestCase):
     # todo
     # def test_proposal_report_faulted(self):
     #     cache.clear()
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
+    #     keypair = Keypair.random()
     #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     acc = models.Account.objects.create(address=keypair.ss58_address)
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+    #     acc = models.Account.objects.create(address=keypair.public_key)
     #     models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
     #     proposal_id = "prop1"
     #     post_data = {"reason": "very good reason"}
@@ -752,10 +792,10 @@ class CoreViewSetTest(IntegrationTestCase):
     # todo
     # def test_proposal_report_faulted_no_holdings(self):
     #     cache.clear()
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
+    #     keypair = Keypair.random()
     #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     models.Account.objects.create(address=keypair.ss58_address)
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+    #     models.Account.objects.create(address=keypair.public_key)
     #     proposal_id = "prop1"
     #     post_data = {"reason": "very good reason"}
     #
@@ -780,10 +820,10 @@ class CoreViewSetTest(IntegrationTestCase):
     # todo
     # def test_proposal_report_faulted_throttle(self):
     #     cache.clear()
-    #     keypair = Keypair.create_from_mnemonic(Keypair.generate_mnemonic())
+    #     keypair = Keypair.random()
     #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key)).decode()
-    #     acc = models.Account.objects.create(address=keypair.ss58_address)
+    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+    #     acc = models.Account.objects.create(address=keypair.public_key)
     #     models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
     #     proposal_id = "prop1"
     #     post_data = {"reason": "very good reason", "proposal_id": proposal_id}

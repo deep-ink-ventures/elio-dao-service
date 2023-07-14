@@ -1,3 +1,4 @@
+import base64
 import binascii
 import time
 from collections import defaultdict
@@ -8,11 +9,11 @@ from typing import DefaultDict, Optional
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
-from stellar_sdk import StrKey
+from stellar_sdk import Keypair, StrKey
 from stellar_sdk.soroban import SorobanServer
 from stellar_sdk.soroban.exceptions import RequestException
 from stellar_sdk.soroban.soroban_rpc import EventFilter
-from stellar_sdk.xdr import PublicKeyType, SCAddressType, SCVal, SCValType
+from stellar_sdk.xdr import SCAddressType, SCVal, SCValType
 
 from core import models as core_models
 from core.event_handler import soroban_event_handler
@@ -36,13 +37,10 @@ def unpack_scval(val: SCVal):
             except UnicodeDecodeError:
                 return StrKey.encode_ed25519_public_key(val.bytes.sc_bytes)
         case SCValType.SCV_ADDRESS:
-            match val.address.type:
-                case SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
-                    match val.address.account_id.account_id.type:
-                        case PublicKeyType.PUBLIC_KEY_TYPE_ED25519:
-                            return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
-                case SCAddressType.SC_ADDRESS_TYPE_CONTRACT:
-                    return StrKey.encode_contract(val.address.contract_id.hash)
+            if val.address.type == SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
+                return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
+            else:  # SCAddressType.SC_ADDRESS_TYPE_CONTRACT:
+                return StrKey.encode_contract(val.address.contract_id.hash)
         case SCValType.SCV_U32:
             return val.u32.uint32
         case SCValType.SCV_I32:
@@ -79,12 +77,7 @@ def retry(description: str):
 
             def log_and_sleep(err_msg: str, log_exception=False):
                 retry_delay = next(retry_delays, max_delay)
-                err_msg = f"{err_msg} while {description}. "
-                if block_number := kwargs.get("block_number"):
-                    err_msg += f"Block number: {block_number}. "
-                if block_hash := kwargs.get("block_hash"):
-                    err_msg += f"Block hash: {block_hash}. "
-                err_msg += f"Retrying in {retry_delay}s ..."
+                err_msg = f"{err_msg} while {description}. Retrying in {retry_delay}s ..."
                 if log_exception:
                     logger.exception(err_msg)
                 else:
@@ -101,7 +94,7 @@ def retry(description: str):
                         case "start is before oldest ledger":
                             raise NoLongerAvailableException
                         case _:
-                            log_and_sleep(f"RequestException | {exc.message}", log_exception=True)
+                            log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
                     log_and_sleep("Unexpected error", log_exception=True)
 
@@ -139,6 +132,30 @@ class SorobanService(object):
         self.soroban.close()
 
     @staticmethod
+    def verify(address: str, challenge_address: str, signature: str) -> bool:
+        """
+        Args:
+            address: Account.address / public key to verify signature for
+            challenge_address: Account.address / public key the challenge has been created for
+            signature: b64 encoded, signed challenge key
+
+        Returns:
+            bool
+
+        verifies whether the given signature matches challenge key signed by address
+        """
+
+        if not (challenge_token := cache.get(challenge_address)):
+            return False
+        try:
+            Keypair.from_public_key(address).verify(
+                data=challenge_token.encode(), signature=base64.b64decode(signature.encode())
+            )
+            return True
+        except Exception:  # noqa E722
+            return False
+
+    @staticmethod
     def sleep(start_time):
         """
         Args:
@@ -164,6 +181,7 @@ class SorobanService(object):
                 """
                 truncate core_block;
                 truncate core_account cascade;
+                truncate core_contract cascade;
                 """
             )
         cache.set(key="restart_listener", value=True)
@@ -258,7 +276,7 @@ class SorobanService(object):
         events_per_block: DefaultDict[int, list] = defaultdict(list)
         latest_ledger = 0
         for i in range(0, len(filters := self.get_events_filters()), 5):
-            # 1 request with up to 5 filter each containing up to 5 contract IDs
+            # 1 request with up to 5 filters each containing up to 5 contract IDs
             res = retry("fetching event data")(self.soroban.get_events)(
                 start_ledger=start_ledger, filters=filters[i : i + 5], limit=10000
             )

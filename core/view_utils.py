@@ -20,7 +20,14 @@ class IsDAOOwner(BasePermission):
     def has_permission(self, request, view):
         return True
 
-    # todo
+    def has_object_permission(self, request, view, obj):
+        return True
+        # todo
+        # from core.soroban import soroban_service
+
+        # return soroban_service.verify(
+        #     address=obj.owner_id, challenge_address=obj.owner_id, signature=request.headers.get("Signature")
+        # )
 
 
 class IsProposalCreator(BasePermission):
@@ -32,12 +39,37 @@ class IsProposalCreator(BasePermission):
     def has_permission(self, request, view):
         return True
 
-    # todo
+    def has_object_permission(self, request, view, obj):
+        return True
+
+        # todo
+        # from core.soroban import soroban_service
+
+        # return soroban_service.verify(
+        #     address=obj.creator_id, challenge_address=obj.dao.owner_id, signature=request.headers.get("Signature")
+        # )
 
 
 class IsTokenHolder(BasePermission):
     message = {"error": "This request's header needs to contain signature=*signed-challenge*."}
-    # todo
+
+    def has_permission(self, request, view):
+        return True
+
+        # todo
+        # from core.models import AssetHolding, Dao
+        # from core.soroban import soroban_service
+
+        # proposal_id = request.parser_context["kwargs"]["pk"]
+        # challenge_address = Dao.objects.values_list("owner_id", flat=True).get(proposals__id=proposal_id)
+        # return any(
+        #     soroban_service.verify(
+        #         address=address, challenge_address=challenge_address, signature=request.headers.get("Signature")
+        #     )
+        #     for address in AssetHolding.objects.filter(asset__dao__proposals__id=proposal_id).values_list(
+        #         "owner_id", flat=True
+        #     )
+        # )
 
 
 class FilterBackend:

@@ -1,11 +1,17 @@
 from collections.abc import Collection, Iterable
 
 from django import test
+from django.core.cache import cache
 from django.db.models import Model
 
 
+class TestCaseBase:
+    def tearDown(self):  # noqa
+        cache.clear()
+
+
 @test.tag("integration")
-class IntegrationTestCase(test.TestCase):
+class IntegrationTestCase(TestCaseBase, test.TestCase):
     databases = [
         "default",
     ]
@@ -58,5 +64,5 @@ class IntegrationTestCase(test.TestCase):
 
 
 @test.tag("unit")
-class UnitTestCase(test.SimpleTestCase):
+class UnitTestCase(TestCaseBase, test.SimpleTestCase):
     maxDiff = None
