@@ -1,8 +1,7 @@
 import base64
 import secrets
 from collections.abc import Collection
-
-# todo from functools import partial
+from functools import partial
 from unittest.mock import PropertyMock, patch
 
 from ddt import data, ddt
@@ -10,11 +9,12 @@ from django.conf import settings
 from django.core.cache import cache
 from django.urls import reverse
 from rest_framework.exceptions import ErrorDetail
-from rest_framework.status import (  # todo HTTP_403_FORBIDDEN,
+from rest_framework.status import (
     HTTP_200_OK,
     HTTP_201_CREATED,
     HTTP_400_BAD_REQUEST,
     HTTP_401_UNAUTHORIZED,
+    HTTP_403_FORBIDDEN,
 )
 from stellar_sdk import Keypair
 
@@ -608,33 +608,32 @@ class CoreViewSetTest(IntegrationTestCase):
             res.data, {"logo": [ErrorDetail(string="The uploaded file is too big. Max size: 2.0 mb.", code="invalid")]}
         )
 
-    # todo
-    # def test_dao_add_metadata_403(self):
-    #     with open("core/tests/test_file.jpeg", "rb") as f:
-    #         post_data = {
-    #             "email": "some@email.com",
-    #             "description": "some description",
-    #             "logo": base64.b64encode(f.read()).decode(),
-    #         }
-    #
-    #     res = self.client.post(
-    #         reverse("core-dao-add-metadata", kwargs={"pk": "dao1"}),
-    #         post_data,
-    #         content_type="application/json",
-    #         HTTP_SIGNATURE="wrong signature",
-    #     )
-    #
-    #     self.assertEqual(res.status_code, HTTP_403_FORBIDDEN)
-    #     self.assertEqual(
-    #         res.data,
-    #         {
-    #             "error": ErrorDetail(
-    #                 code="permission_denied",
-    #                 string="Only the DAO owner has access to this action. "
-    #                 "Header needs to contain signature=*signed-challenge*.",
-    #             )
-    #         },
-    #     )
+    def test_dao_add_metadata_403(self):
+        with open("core/tests/test_file.jpeg", "rb") as f:
+            post_data = {
+                "email": "some@email.com",
+                "description": "some description",
+                "logo": base64.b64encode(f.read()).decode(),
+            }
+
+        res = self.client.post(
+            reverse("core-dao-add-metadata", kwargs={"pk": "dao1"}),
+            post_data,
+            content_type="application/json",
+            HTTP_SIGNATURE="wrong signature",
+        )
+
+        self.assertEqual(res.status_code, HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            res.data,
+            {
+                "error": ErrorDetail(
+                    code="permission_denied",
+                    string="Only the DAO owner has access to this action. "
+                    "Header needs to contain signature=*signed-challenge*.",
+                )
+            },
+        )
 
     def test_asset_get(self):
         expected_res = {"id": 1, "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
@@ -710,151 +709,146 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertDictEqual(res.data, expected_res)
 
-    # todo
-    # def test_proposal_add_metadata(self):
-    #     keypair = Keypair.random()
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
-    #     acc = models.Account.objects.create(address=keypair.public_key)
-    #     models.Proposal.objects.create(id="PROP1", dao_id="dao1", creator=acc, birth_block_number=10)
-    #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #
-    #     post_data = {
-    #         "title": "some title",
-    #         "description": "short description",
-    #         "url": "https://www.some-url.com/",
-    #     }
-    #     expected_res = {
-    #         "metadata": post_data,
-    #         "metadata_hash": "384f400447f439767311418582fb9f779ba44e18905d225598b48f32eb950ce1",
-    #         "metadata_url": "https://some_storage.some_region.com/dao1/proposals/PROP1/metadata.json",
-    #     }
-    #
-    #     with self.assertNumQueries(4):
-    #         res = self.client.post(
-    #             reverse("core-proposal-add-metadata", kwargs={"pk": "PROP1"}),
-    #             post_data,
-    #             content_type="application/json",
-    #             HTTP_SIGNATURE=signature,
-    #         )
-    #
-    #     self.assertEqual(res.status_code, HTTP_201_CREATED, res.data)
-    #     self.assertDictEqual(res.data, expected_res)
+    def test_proposal_add_metadata(self):
+        keypair = Keypair.random()
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        acc = models.Account.objects.create(address=keypair.public_key)
+        models.Proposal.objects.create(id="PROP1", dao_id="dao1", creator=acc, birth_block_number=10)
+        cache.set(key="acc1", value=self.challenge_key, timeout=5)
 
-    # todo
-    # def test_proposal_add_metadata_403(self):
-    #     post_data = {
-    #         "title": "some title",
-    #         "description": "short description",
-    #         "url": "https://www.some-url.com/",
-    #     }
-    #
-    #     with self.assertNumQueries(3):
-    #         res = self.client.post(
-    #             reverse("core-proposal-add-metadata", kwargs={"pk": "prop1"}),
-    #             post_data,
-    #             content_type="application/json",
-    #             HTTP_SIGNATURE="wrong signature",
-    #         )
-    #
-    #     self.assertEqual(res.status_code, HTTP_403_FORBIDDEN)
-    #     self.assertEqual(
-    #         res.data,
-    #         {
-    #             "error": ErrorDetail(
-    #                 code="permission_denied",
-    #                 string="Only the Proposal creator has access to this action. "
-    #                 "Header needs to contain signature=*signed-challenge*.",
-    #             )
-    #         },
-    #     )
+        post_data = {
+            "title": "some title",
+            "description": "short description",
+            "url": "https://www.some-url.com/",
+        }
+        expected_res = {
+            "metadata": post_data,
+            "metadata_hash": "384f400447f439767311418582fb9f779ba44e18905d225598b48f32eb950ce1",
+            "metadata_url": "https://some_storage.some_region.com/dao1/proposals/PROP1/metadata.json",
+        }
 
-    # todo
-    # def test_proposal_report_faulted(self):
-    #     cache.clear()
-    #     keypair = Keypair.random()
-    #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
-    #     acc = models.Account.objects.create(address=keypair.public_key)
-    #     models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
-    #     proposal_id = "prop1"
-    #     post_data = {"reason": "very good reason"}
-    #
-    #     with self.assertNumQueries(4):
-    #         res = self.client.post(
-    #             reverse("core-proposal-report-faulted", kwargs={"pk": proposal_id}),
-    #             post_data,
-    #             content_type="application/json",
-    #             HTTP_SIGNATURE=signature,
-    #         )
-    #
-    #     self.assertEqual(res.data, {**post_data, "proposal_id": proposal_id})
+        with self.assertNumQueries(4):
+            res = self.client.post(
+                reverse("core-proposal-add-metadata", kwargs={"pk": "PROP1"}),
+                post_data,
+                content_type="application/json",
+                HTTP_SIGNATURE=signature,
+            )
 
-    # todo
-    # def test_proposal_report_faulted_no_holdings(self):
-    #     cache.clear()
-    #     keypair = Keypair.random()
-    #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
-    #     models.Account.objects.create(address=keypair.public_key)
-    #     proposal_id = "prop1"
-    #     post_data = {"reason": "very good reason"}
-    #
-    #     with self.assertNumQueries(2):
-    #         res = self.client.post(
-    #             reverse("core-proposal-report-faulted", kwargs={"pk": proposal_id}),
-    #             post_data,
-    #             content_type="application/json",
-    #             HTTP_SIGNATURE=signature,
-    #         )
-    #
-    #     self.assertEqual(
-    #         res.data,
-    #         {
-    #             "error": ErrorDetail(
-    #                 string="This request's header needs to contain signature=*signed-challenge*.",
-    #                 code="permission_denied",
-    #             )
-    #         },
-    #     )
+        self.assertEqual(res.status_code, HTTP_201_CREATED, res.data)
+        self.assertDictEqual(res.data, expected_res)
 
-    # todo
-    # def test_proposal_report_faulted_throttle(self):
-    #     cache.clear()
-    #     keypair = Keypair.random()
-    #     cache.set(key="acc1", value=self.challenge_key, timeout=5)
-    #     signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
-    #     acc = models.Account.objects.create(address=keypair.public_key)
-    #     models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
-    #     proposal_id = "prop1"
-    #     post_data = {"reason": "very good reason", "proposal_id": proposal_id}
-    #
-    #     call = partial(
-    #         self.client.post,
-    #         reverse("core-proposal-report-faulted", kwargs={"pk": proposal_id}),
-    #         post_data,
-    #         content_type="application/json",
-    #         HTTP_SIGNATURE=signature,
-    #     )
-    #     for count in range(7):
-    #         if count < 3:
-    #             with self.assertNumQueries(4):
-    #                 res = call()
-    #             self.assertEqual(res.data, post_data)
-    #         elif count < 5:
-    #             with self.assertNumQueries(3):
-    #                 res = call()
-    #             self.assertEqual(res.data, {"detail": "The proposal report maximum has already been reached."})
-    #         else:
-    #             with self.assertNumQueries(2):
-    #                 res = call()
-    #             self.assertEqual(
-    #                 res.data,
-    #                 {
-    #                     "detail": ErrorDetail(
-    #                         "Request was throttled. Expected available in 3600 seconds.", code="throttled"
-    #                     )
-    #                 },
-    #             )
+    def test_proposal_add_metadata_403(self):
+        post_data = {
+            "title": "some title",
+            "description": "short description",
+            "url": "https://www.some-url.com/",
+        }
+
+        with self.assertNumQueries(3):
+            res = self.client.post(
+                reverse("core-proposal-add-metadata", kwargs={"pk": "prop1"}),
+                post_data,
+                content_type="application/json",
+                HTTP_SIGNATURE="wrong signature",
+            )
+
+        self.assertEqual(res.status_code, HTTP_403_FORBIDDEN)
+        self.assertEqual(
+            res.data,
+            {
+                "error": ErrorDetail(
+                    code="permission_denied",
+                    string="Only the Proposal creator has access to this action. "
+                    "Header needs to contain signature=*signed-challenge*.",
+                )
+            },
+        )
+
+    def test_proposal_report_faulted(self):
+        cache.clear()
+        keypair = Keypair.random()
+        cache.set(key="acc1", value=self.challenge_key, timeout=5)
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        acc = models.Account.objects.create(address=keypair.public_key)
+        models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
+        proposal_id = "prop1"
+        post_data = {"reason": "very good reason"}
+
+        with self.assertNumQueries(4):
+            res = self.client.post(
+                reverse("core-proposal-report-faulted", kwargs={"pk": proposal_id}),
+                post_data,
+                content_type="application/json",
+                HTTP_SIGNATURE=signature,
+            )
+
+        self.assertEqual(res.data, {**post_data, "proposal_id": proposal_id})
+
+    def test_proposal_report_faulted_no_holdings(self):
+        cache.clear()
+        keypair = Keypair.random()
+        cache.set(key="acc1", value=self.challenge_key, timeout=5)
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        models.Account.objects.create(address=keypair.public_key)
+        proposal_id = "prop1"
+        post_data = {"reason": "very good reason"}
+
+        with self.assertNumQueries(2):
+            res = self.client.post(
+                reverse("core-proposal-report-faulted", kwargs={"pk": proposal_id}),
+                post_data,
+                content_type="application/json",
+                HTTP_SIGNATURE=signature,
+            )
+
+        self.assertEqual(
+            res.data,
+            {
+                "error": ErrorDetail(
+                    string="This request's header needs to contain signature=*signed-challenge*.",
+                    code="permission_denied",
+                )
+            },
+        )
+
+    def test_proposal_report_faulted_throttle(self):
+        cache.clear()
+        keypair = Keypair.random()
+        cache.set(key="acc1", value=self.challenge_key, timeout=5)
+        signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
+        acc = models.Account.objects.create(address=keypair.public_key)
+        models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
+        proposal_id = "prop1"
+        post_data = {"reason": "very good reason", "proposal_id": proposal_id}
+
+        call = partial(
+            self.client.post,
+            reverse("core-proposal-report-faulted", kwargs={"pk": proposal_id}),
+            post_data,
+            content_type="application/json",
+            HTTP_SIGNATURE=signature,
+        )
+        for count in range(7):
+            if count < 3:
+                with self.assertNumQueries(4):
+                    res = call()
+                self.assertEqual(res.data, post_data)
+            elif count < 5:
+                with self.assertNumQueries(3):
+                    res = call()
+                self.assertEqual(res.data, {"detail": "The proposal report maximum has already been reached."})
+            else:
+                with self.assertNumQueries(2):
+                    res = call()
+                self.assertEqual(
+                    res.data,
+                    {
+                        "detail": ErrorDetail(
+                            "Request was throttled. Expected available in 3600 seconds.", code="throttled"
+                        )
+                    },
+                )
 
     def test_reports(self):
         models.ProposalReport.objects.create(proposal_id="prop1", reason="reason 1")
