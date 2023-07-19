@@ -327,7 +327,8 @@ class SorobanEventHandler:
         }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=proposal_data.keys())):
                 proposal.metadata_url, proposal.metadata_hash = proposal_data[proposal.id]
-            models.Proposal.objects.bulk_update(proposals, fields=["metadata_hash", "metadata_url"])
+                proposal.setup_complete = True
+            models.Proposal.objects.bulk_update(proposals, fields=["metadata_hash", "metadata_url", "setup_complete"])
             tasks.update_proposal_metadata.delay(proposal_ids=list(proposal_data.keys()))
 
     @staticmethod

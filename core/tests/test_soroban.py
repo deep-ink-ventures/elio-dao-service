@@ -361,8 +361,8 @@ class SorobanTest(IntegrationTestCase):
         models.Asset.objects.create(id="a1", dao_id="d1", owner_id="acc1", total_supply=0)
         models.Asset.objects.create(id="a2", dao_id="d2", owner_id="acc2", total_supply=0)
         expected_ids = [
-            b"6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-            b"15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+            b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+            b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
             "a1",
             "a2",
         ]
@@ -376,8 +376,8 @@ class SorobanTest(IntegrationTestCase):
         cache.set(
             "trusted_contract_ids",
             [
-                b"6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                b"15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                 "a1",
                 "a2",
                 "a3",
@@ -388,8 +388,8 @@ class SorobanTest(IntegrationTestCase):
         expected_filters = [
             EventFilter(
                 contractIds=[
-                    b"6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                    b"15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                    b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                    b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                     "a1",
                     "a2",
                     "a3",
@@ -416,8 +416,8 @@ class SorobanTest(IntegrationTestCase):
             filters=[
                 EventFilter(
                     contractIds=[
-                        "6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                        "15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                        "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                        "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                     ],
                 )
             ],
@@ -543,8 +543,8 @@ class SorobanTest(IntegrationTestCase):
             filters=[
                 EventFilter(
                     contractIds=[
-                        "6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                        "15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                        "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                        "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                     ],
                 )
             ],

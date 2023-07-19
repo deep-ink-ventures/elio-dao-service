@@ -114,6 +114,7 @@ class CoreViewSetTest(IntegrationTestCase):
             fault="some reason",
             status=models.ProposalStatus.FAULTED,
             birth_block_number=15,
+            setup_complete=True,
         )
         models.Vote.objects.create(proposal_id="prop1", voter_id="acc1", in_favor=True, voting_power=500)
         models.Vote.objects.create(proposal_id="prop1", voter_id="acc2", in_favor=True, voting_power=300)
@@ -668,6 +669,7 @@ class CoreViewSetTest(IntegrationTestCase):
             "status": models.ProposalStatus.RUNNING,
             "votes": {"pro": 800, "contra": 100, "abstained": 100, "total": 1000},
             "birth_block_number": 10,
+            "setup_complete": False,
         }
 
         with self.assertNumQueries(2):
@@ -689,6 +691,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "status": models.ProposalStatus.RUNNING,
                     "votes": {"pro": 800, "contra": 100, "abstained": 100, "total": 1000},
                     "birth_block_number": 10,
+                    "setup_complete": False,
                 },
                 {
                     "id": "prop2",
@@ -701,6 +704,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "status": models.ProposalStatus.FAULTED,
                     "votes": {"pro": 0, "contra": 200, "abstained": 0, "total": 200},
                     "birth_block_number": 15,
+                    "setup_complete": True,
                 },
             ]
         )

@@ -96,6 +96,7 @@ class Proposal(TimestampableMixin):
     metadata = models.JSONField(null=True)
     metadata_url = models.CharField(max_length=256, null=True)
     metadata_hash = models.CharField(max_length=256, null=True)
+    setup_complete = models.BooleanField(default=False)
 
 
 class ProposalReport(TimestampableMixin):
