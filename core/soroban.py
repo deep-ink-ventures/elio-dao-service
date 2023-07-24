@@ -75,8 +75,11 @@ def retry(description: str):
             max_delay = retry_delays[-1]
             retry_delays = iter(retry_delays)
 
-            def log_and_sleep(err_msg: str, log_exception=False):
+            def log_and_sleep(err_msg: str, log_exception=False, stop_at_max_retry=False):
                 retry_delay = next(retry_delays, max_delay)
+                if stop_at_max_retry and retry_delay == max_delay:
+                    logger.error("Breaking retry.")
+                    raise OutOfSyncException
                 err_msg = f"{err_msg} while {description}. Retrying in {retry_delay}s ..."
                 if log_exception:
                     logger.exception(err_msg)
@@ -90,7 +93,7 @@ def retry(description: str):
                 except RequestException as exc:
                     match exc.message:
                         case "start is after newest ledger":
-                            log_and_sleep("RequestException (ahead of chain)")
+                            log_and_sleep("RequestException (ahead of chain)", stop_at_max_retry=True)
                         case "start is before oldest ledger":
                             raise NoLongerAvailableException
                         case _:
@@ -314,7 +317,7 @@ class SorobanService(object):
                 logger.info(f"Listening... Latest block number: {latest_block_number}")
                 try:
                     latest_block_number = self.fetch_event_data(start_ledger=latest_block_number)
-                except IntegrityError:
+                except (IntegrityError, OutOfSyncException):
                     self.clear_db_and_cache(start_time=start_time)
                     latest_block_number = self.find_start_ledger()
                 except NoLongerAvailableException:

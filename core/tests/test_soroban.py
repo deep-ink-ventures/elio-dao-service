@@ -36,6 +36,7 @@ from stellar_sdk.xdr import (
 from core import models
 from core.soroban import (
     NoLongerAvailableException,
+    OutOfSyncException,
     retry,
     soroban_service,
     unpack_scval,
@@ -147,16 +148,18 @@ class SorobanTest(IntegrationTestCase):
     @patch("core.soroban.logger")
     @patch("core.soroban.time.sleep")
     def test_retry_ahead_of_chain(self, sleep_mock, logger_mock):
-        sleep_mock.side_effect = None, None, Exception("break retry")
+        sleep_mock.side_effect = None, None, None, Exception("break retry")
 
         def func():
             raise RequestException(message="start is after newest ledger", code=0)
 
-        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+        with override_settings(RETRY_DELAYS=(1, 2, 3, 4)), self.assertRaises(OutOfSyncException):
             retry("some description")(func)()
 
         expected_err_msg = "RequestException (ahead of chain) while some description. Retrying in %ss ..."
-        logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+        self.assertExactCalls(
+            logger_mock.error, [*[call(expected_err_msg % i) for i in range(1, 4)], call("Breaking retry.")]
+        )
 
     def test_retry_no_longer_available(self):
         def func():

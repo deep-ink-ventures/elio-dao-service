@@ -1,17 +1,23 @@
 from collections.abc import Collection, Iterable
+from typing import Sequence
+from unittest.mock import Mock
 
 from django import test
 from django.core.cache import cache
 from django.db.models import Model
 
 
-class TestCaseBase:
+class TestCaseBase(test.TestCase):
     def tearDown(self):  # noqa
         cache.clear()
 
+    def assertExactCalls(self, mock: Mock, calls: Sequence):
+        mock.assert_has_calls(calls=calls)
+        self.assertEqual(len(calls), mock.call_count)
+
 
 @test.tag("integration")
-class IntegrationTestCase(TestCaseBase, test.TestCase):
+class IntegrationTestCase(TestCaseBase):
     databases = [
         "default",
     ]
