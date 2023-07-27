@@ -643,7 +643,7 @@ class CoreViewSetTest(IntegrationTestCase):
     #     )
 
     def test_asset_get(self):
-        expected_res = {"id": 1, "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
+        expected_res = {"id": "1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
 
         with self.assertNumQueries(1):
             res = self.client.get(reverse("core-asset-detail", kwargs={"pk": 1}))
@@ -653,8 +653,8 @@ class CoreViewSetTest(IntegrationTestCase):
     def test_asset_get_list(self):
         expected_res = wrap_in_pagination_res(
             [
-                {"id": 1, "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
-                {"id": 2, "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
+                {"id": "1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
+                {"id": "2", "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
             ]
         )
         with self.assertNumQueries(2):

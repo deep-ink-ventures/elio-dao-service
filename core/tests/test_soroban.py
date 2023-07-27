@@ -326,7 +326,7 @@ class SorobanTest(IntegrationTestCase):
                 "network_passphrase": "e",
             },
         ),
-        # no input, existing, cache
+        # no input, existing cache
         (
             None,
             {

@@ -198,7 +198,7 @@ class SorobanService(object):
         Returns:
             current config data
 
-        set's soroban config data cache
+        sets soroban config data cache
         """
         data = {
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,

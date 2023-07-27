@@ -178,8 +178,7 @@ class SorobanEventHandler:
         rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
         """
         asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
-        asset_ids_to_owner_ids = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
-        asset_id: str
+        asset_ids_to_owner_ids: DefaultDict = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
         accs = set()
         # contract_id becomes asset_id
         for asset_id, transfers in event_data.items():
@@ -190,6 +189,9 @@ class SorobanEventHandler:
                 asset_ids_to_owner_ids[asset_id].add(to_acc)
                 accs.add(models.Account(address=to_acc))
         if asset_holding_data:
+            models.Dao.objects.filter(asset__in=asset_ids_to_owner_ids.keys(), setup_complete=False).update(
+                setup_complete=True
+            )
             models.Account.objects.bulk_create(accs, ignore_conflicts=True)
             existing_holdings = collections.defaultdict(dict)
             for asset_holding in models.AssetHolding.objects.filter(

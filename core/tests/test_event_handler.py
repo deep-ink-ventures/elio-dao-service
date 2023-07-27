@@ -245,10 +245,6 @@ class EventHandlerTest(IntegrationTestCase):
             "2": [{"amount": 20, "owner_id": "acc2", "new_owner_id": "acc1", "not": "interesting"}],
             "3": [{"amount": 50, "owner_id": "acc3", "new_owner_id": "acc2", "not": "interesting"}],
         }
-
-        with self.assertNumQueries(4):
-            soroban_event_handler._transfer_assets(event_data=event_data)
-
         expected_asset_holdings = [
             models.AssetHolding(asset_id="1", owner_id="acc1", balance=75),  # 100 - 10 - 15
             models.AssetHolding(asset_id="1", owner_id="acc2", balance=50),  # 0 + 10 + 15 + 25
@@ -260,11 +256,36 @@ class EventHandlerTest(IntegrationTestCase):
             models.AssetHolding(asset_id="3", owner_id="acc3", balance=250),  # 300 - 50
             models.AssetHolding(asset_id="4", owner_id="acc3", balance=400),  # 300
         ]
+        expected_daos = [
+            models.Dao(
+                id="dao1",
+                contract_id="contract1",
+                name="dao1 name",
+                owner_id="acc1",
+                creator_id="acc1",
+                setup_complete=True,
+            ),
+            models.Dao(
+                id="dao2",
+                contract_id="contract2",
+                name="dao2 name",
+                owner_id="acc2",
+                creator_id="acc2",
+                setup_complete=True,
+            ),
+            models.Dao(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3", setup_complete=True),
+            models.Dao(id="dao4", contract_id="contract4", name="dao4 name", owner_id="acc3", setup_complete=False),
+        ]
+
+        with self.assertNumQueries(5):
+            soroban_event_handler._transfer_assets(event_data=event_data)
+
         self.assertModelsEqual(
             models.AssetHolding.objects.order_by("asset_id", "owner_id"),
             expected_asset_holdings,
             ignore_fields=("id", "created_at", "updated_at"),
         )
+        self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     @patch("core.file_handling.file_handler.urlopen")
     def test__set_dao_metadata(self, urlopen_mock):

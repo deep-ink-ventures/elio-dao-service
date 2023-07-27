@@ -135,7 +135,7 @@ class DaoMetadataResponseSerializer(Serializer):  # noqa
 
 
 class AssetSerializer(ModelSerializer):
-    id = IntegerField(min_value=0)
+    id = CharField(required=True)
     dao_id = CharField(required=True)
     owner_id = CharField(required=True)
     total_supply = IntegerField(min_value=0)
@@ -146,7 +146,7 @@ class AssetSerializer(ModelSerializer):
 
 
 class AssetHoldingSerializer(ModelSerializer):
-    asset_id = IntegerField(min_value=0)
+    asset_id = CharField(required=True)
     owner_id = CharField(required=True)
     balance = IntegerField(min_value=0)
 
