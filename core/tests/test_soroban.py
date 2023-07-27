@@ -130,20 +130,15 @@ class SorobanTest(IntegrationTestCase):
         (
             SCVal(
                 SCValType.SCV_LEDGER_KEY_NONCE,
-                nonce_key=SCNonceKey(
-                    nonce_address=SCAddress(
-                        type=SCAddressType(SCAddressType.SC_ADDRESS_TYPE_CONTRACT),
-                        contract_id=Hash(hash="AbC".encode()),
-                    )
-                ),
+                nonce_key=SCNonceKey(nonce=Int64(int64=123)),
             ),
-            "<SCVal [type=21, nonce_key=<SCNonceKey [nonce_address=<SCAddress [type=1, contract_id=<Hash [hash=b'AbC']>]>]>]>",  # noqa
+            "<SCVal [type=21, nonce_key=<SCNonceKey [nonce=<Int64 [int64=123]>]>]>",
         ),
     )
     def test_unpack_scval(self, case):
         input_value, expected = case
 
-        self.assertEqual(unpack_scval(input_value), expected)
+        self.assertEqual(unpack_scval(input_value), expected, input_value)
 
     @patch("core.soroban.logger")
     @patch("core.soroban.time.sleep")
@@ -318,6 +313,97 @@ class SorobanTest(IntegrationTestCase):
             self.assertListEqual(list(model.objects.all()), [])
 
     @data(
+        # input_data, current_cache, expected_res
+        # no input, no cache
+        (
+            None,
+            None,
+            {
+                "core_contract_address": "a",
+                "votes_contract_address": "b",
+                "assets_wasm_hash": "c",
+                "blockchain_url": "d",
+                "network_passphrase": "e",
+            },
+        ),
+        # no input, existing, cache
+        (
+            None,
+            {
+                "core_contract_address": 1,
+                "votes_contract_address": 2,
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+            },
+            {
+                "core_contract_address": 1,
+                "votes_contract_address": 2,
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+                "network_passphrase": "e",
+            },
+        ),
+        # input overwrites cache
+        (
+            {
+                "core_contract_address": "a1",
+                "votes_contract_address": "a2",
+            },
+            {
+                "core_contract_address": 1,
+                "votes_contract_address": 2,
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+            },
+            {
+                "core_contract_address": "a1",
+                "votes_contract_address": "a2",
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+                "network_passphrase": "e",
+            },
+        ),
+    )
+    def test_set_config(self, case):
+        input_data, current_cache, expected_res = case
+
+        if current_cache:
+            cache.set("soroban_config", current_cache)
+
+        with override_settings(
+            CORE_CONTRACT_ADDRESS="a",
+            VOTES_CONTRACT_ADDRESS="b",
+            ASSETS_WASM_HASH="c",
+            BLOCKCHAIN_URL="d",
+            NETWORK_PASSPHRASE="e",
+        ):
+            res = soroban_service.set_config(data=input_data)
+
+        self.assertEqual(res, expected_res)
+        self.assertEqual(cache.get("soroban_config"), expected_res)
+
+    def test_set_trusted_contract_ids(self):
+        models.Account.objects.create(address="acc1")
+        models.Account.objects.create(address="acc2")
+        models.Contract.objects.create(id="c1")
+        models.Contract.objects.create(id="c2")
+        models.Dao.objects.create(id="d1", contract_id="c1", owner_id="acc1")
+        models.Dao.objects.create(id="d2", contract_id="c2", owner_id="acc2")
+        models.Asset.objects.create(id="a1", dao_id="d1", owner_id="acc1", total_supply=0)
+        models.Asset.objects.create(id="a2", dao_id="d2", owner_id="acc2", total_supply=0)
+        expected_ids = [
+            b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+            b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+            "a1",
+            "a2",
+        ]
+
+        ids = soroban_service.set_trusted_contract_ids()
+
+        self.assertEqual(ids, expected_ids)
+        self.assertEqual(cache.get("trusted_contract_ids"), expected_ids)
+
+    @data(
         # start, end, guess
         (0, 15, 5),
         (10, 15, 5),
@@ -353,27 +439,6 @@ class SorobanTest(IntegrationTestCase):
 
         with self.assertRaisesMessage(RequestException, "roar"):
             soroban_service.find_start_ledger()
-
-    def test_set_trusted_contract_ids(self):
-        models.Account.objects.create(address="acc1")
-        models.Account.objects.create(address="acc2")
-        models.Contract.objects.create(id="c1")
-        models.Contract.objects.create(id="c2")
-        models.Dao.objects.create(id="d1", contract_id="c1", owner_id="acc1")
-        models.Dao.objects.create(id="d2", contract_id="c2", owner_id="acc2")
-        models.Asset.objects.create(id="a1", dao_id="d1", owner_id="acc1", total_supply=0)
-        models.Asset.objects.create(id="a2", dao_id="d2", owner_id="acc2", total_supply=0)
-        expected_ids = [
-            b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
-            b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
-            "a1",
-            "a2",
-        ]
-
-        ids = soroban_service.set_trusted_contract_ids()
-
-        self.assertEqual(ids, expected_ids)
-        self.assertEqual(cache.get("trusted_contract_ids"), expected_ids)
 
     def test_get_events_filters(self):
         cache.set(

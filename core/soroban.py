@@ -123,13 +123,11 @@ class NoLongerAvailableException(SorobanException):
 
 
 class SorobanService(object):
-    soroban = None
+    soroban: SorobanServer = None
 
     @retry("initializing blockchain connection")
     def __init__(self):
-        self.soroban = SorobanServer(
-            server_url=settings.BLOCKCHAIN_URL,
-        )
+        self.soroban = SorobanServer(server_url=self.set_config()["blockchain_url"])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
@@ -191,6 +189,48 @@ class SorobanService(object):
         if start_time:
             self.sleep(start_time=start_time)
 
+    @staticmethod
+    def set_config(data: dict = None) -> dict:
+        """
+        Args:
+            data: config data to set
+
+        Returns:
+            current config data
+
+        set's soroban config data cache
+        """
+        data = {
+            "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
+            "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
+            "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "blockchain_url": settings.BLOCKCHAIN_URL,
+            "network_passphrase": settings.NETWORK_PASSPHRASE,
+            **(cache.get("soroban_config") or {}),
+            **(data or {}),
+        }
+        cache.set(key="soroban_config", value=data)
+        return data
+
+    def set_trusted_contract_ids(self) -> [str]:
+        """
+        sets "trusted_contract_ids" to
+            cache["config"]["core_contract_address"],
+            cache["config"]["votes_contract_address"],
+            all Asset IDs
+
+        Returns:
+            list of trusted contract IDs
+        """
+        config = self.set_config()
+        trusted_contract_ids = [
+            binascii.hexlify(StrKey.decode_contract(config["core_contract_address"])),
+            binascii.hexlify(StrKey.decode_contract(config["votes_contract_address"])),
+            *core_models.Asset.objects.values_list("id", flat=True),
+        ]
+        cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
+        return trusted_contract_ids
+
     def find_start_ledger(self, lower_bound: int = 0):
         """
         searches for the oldest ledger idx starting from envvar SOROBAN_START_LEDGER
@@ -231,23 +271,6 @@ class SorobanService(object):
                     if check(idx - 1) == "<":
                         return idx
                     higher_bound = idx
-
-    @staticmethod
-    def set_trusted_contract_ids() -> [str]:
-        """
-        sets "trusted_contract_ids" to CORE_CONTRACT_ADDRESS, VOTES_CONTRACT_ADDRESS (provided via env)
-        + all Asset IDs
-
-        Returns:
-            list of trusted contract IDs
-        """
-        trusted_contract_ids = [
-            binascii.hexlify(StrKey.decode_contract(settings.CORE_CONTRACT_ADDRESS)),
-            binascii.hexlify(StrKey.decode_contract(settings.VOTES_CONTRACT_ADDRESS)),
-            *core_models.Asset.objects.values_list("id", flat=True),
-        ]
-        cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
-        return trusted_contract_ids
 
     def get_events_filters(self):
         """
@@ -307,7 +330,15 @@ class SorobanService(object):
 
     def listen(self):
         while True:
-            cache.delete("restart_listener")
+            # reinitializing connection to the chain
+            if cache.get("restart_listener"):
+                logger.info("Restarting listener...")
+                self.soroban.close()
+                self.soroban = retry("reinitializing blockchain connection")(SorobanServer)(
+                    server_url=self.set_config()["blockchain_url"]
+                )
+                cache.delete("restart_listener")
+            # execute existing Blocks
             for block in core_models.Block.objects.filter(executed=False).order_by("number"):
                 soroban_event_handler.execute_actions(block=block)
             latest_block = core_models.Block.objects.order_by("-number").first()

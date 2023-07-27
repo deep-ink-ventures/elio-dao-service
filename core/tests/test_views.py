@@ -153,6 +153,8 @@ class CoreViewSetTest(IntegrationTestCase):
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "blockchain_url": settings.BLOCKCHAIN_URL,
+            "network_passphrase": settings.NETWORK_PASSPHRASE,
         }
 
         with self.assertNumQueries(0):
@@ -160,20 +162,26 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertDictEqual(res.data, expected_res)
 
-    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
+    @patch("core.soroban.SorobanService.set_config")
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     def test_update_config(self, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
         expected_res = {
             "core_contract_address": "c",
             "votes_contract_address": "v",
             "assets_wasm_hash": "a",
+            "blockchain_url": "b",
+            "network_passphrase": "n",
+        }
+        payload = {
+            **expected_res,
+            "network_passphrase2": "n",
         }
 
         with self.assertNumQueries(0):
             res = self.client.patch(
                 reverse("core-update-config"),
                 data={
-                    **expected_res,
+                    **payload,
                     "not": "interesting",
                 },
                 content_type="application/json",
@@ -183,10 +191,7 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertEqual(res.status_code, HTTP_200_OK)
         self.assertDictEqual(res.data, expected_res)
         clear_db_and_cache_mock.assert_called_once_with()
-        set_trusted_contract_ids_mock.assert_called_once_with()
-        self.assertEqual(settings.CORE_CONTRACT_ADDRESS, "c")
-        self.assertEqual(settings.VOTES_CONTRACT_ADDRESS, "v")
-        self.assertEqual(settings.ASSETS_WASM_HASH, "a")
+        set_trusted_contract_ids_mock.assert_called_once_with(data=expected_res)
 
     @patch("core.soroban.SorobanService.set_trusted_contract_ids")
     @patch("core.soroban.SorobanService.clear_db_and_cache")

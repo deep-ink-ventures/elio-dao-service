@@ -96,6 +96,8 @@ def config(request, *args, **kwargs):
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "blockchain_url": settings.BLOCKCHAIN_URL,
+            "network_passphrase": settings.NETWORK_PASSPHRASE,
         }
     )
     serializer.is_valid(raise_exception=True)
@@ -116,21 +118,10 @@ def update_config(request, *args, **kwargs):
     if not (secret := settings.CONFIG_SECRET) or request.headers.get("Config-Secret") != secret:
         return Response(status=HTTP_401_UNAUTHORIZED)
 
-    data = {
-        "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
-        "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
-        "assets_wasm_hash": settings.ASSETS_WASM_HASH,
-        **request.data,
-    }
-    serializer = serializers.UpdateConfigSerializer(data=data)
+    serializer = serializers.UpdateConfigSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-
-    settings.CORE_CONTRACT_ADDRESS = data["core_contract_address"]
-    settings.VOTES_CONTRACT_ADDRESS = data["votes_contract_address"]
-    settings.ASSETS_WASM_HASH = data["assets_wasm_hash"]
-    cache.set(key="restart_listener", value=True)
     soroban_service.clear_db_and_cache()
-    soroban_service.set_trusted_contract_ids()
+    soroban_service.set_config(data=serializer.data)
     return Response(data=serializer.data, status=HTTP_200_OK)
 
 
