@@ -88,16 +88,14 @@ def stats(request, *args, **kwargs):
 )
 @api_view()
 def config(request, *args, **kwargs):
+    from core.soroban import soroban_service
+
     serializer = serializers.ConfigSerializer(
         data={
             "deposit_to_create_dao": settings.DEPOSIT_TO_CREATE_DAO,
             "deposit_to_create_proposal": settings.DEPOSIT_TO_CREATE_PROPOSAL,
             "block_creation_interval": settings.BLOCK_CREATION_INTERVAL,
-            "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
-            "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
-            "assets_wasm_hash": settings.ASSETS_WASM_HASH,
-            "blockchain_url": settings.BLOCKCHAIN_URL,
-            "network_passphrase": settings.NETWORK_PASSPHRASE,
+            **soroban_service.set_config(),
         }
     )
     serializer.is_valid(raise_exception=True)
