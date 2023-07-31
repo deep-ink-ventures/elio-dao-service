@@ -84,6 +84,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": f"{redis}/1",
+        "TIMEOUT": None,
     },
 }
 
