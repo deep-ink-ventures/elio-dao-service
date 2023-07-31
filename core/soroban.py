@@ -3,8 +3,9 @@ import binascii
 import time
 from collections import defaultdict
 from functools import wraps
+from json import JSONDecodeError
 from logging import getLogger
-from typing import DefaultDict, Optional
+from typing import DefaultDict, Optional, Type
 
 from django.conf import settings
 from django.core.cache import cache
@@ -12,6 +13,8 @@ from django.db import IntegrityError, connection
 from stellar_sdk import Keypair, StrKey
 from stellar_sdk.soroban import SorobanServer
 from stellar_sdk.soroban.exceptions import RequestException
+from stellar_sdk.soroban.jsonrpc import Request, Response
+from stellar_sdk.soroban.server import V  # noqa
 from stellar_sdk.soroban.soroban_rpc import EventFilter
 from stellar_sdk.xdr import SCAddressType, SCVal, SCValType
 
@@ -96,6 +99,8 @@ def retry(description: str):
                             log_and_sleep("RequestException (ahead of chain)", stop_at_max_retry=True)
                         case "start is before oldest ledger":
                             raise NoLongerAvailableException
+                        case "404 Not Found":
+                            log_and_sleep("RequestException (404)")
                         case _:
                             log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
@@ -122,12 +127,32 @@ class NoLongerAvailableException(SorobanException):
     msg = "The requested ledger is no longer available."
 
 
+class RobustSorobanServer(SorobanServer):
+    """
+    added JSONDecodeError handling
+    """
+
+    def _post(self, request_body: Request, response_body_type: Type[V]) -> V:
+        json_data = request_body.dict(by_alias=True)
+        data = self._client.post(
+            self.server_url,
+            json_data=json_data,
+        )
+        try:
+            response = Response[response_body_type, str].parse_obj(data.json())
+        except JSONDecodeError:
+            raise RequestException(data.status_code, data.text)
+        if response.error:
+            raise RequestException(response.error.code, response.error.message)
+        return response.result
+
+
 class SorobanService(object):
-    soroban: SorobanServer = None
+    soroban: RobustSorobanServer = None
 
     @retry("initializing blockchain connection")
     def __init__(self):
-        self.soroban = SorobanServer(server_url=self.set_config()["blockchain_url"])
+        self.soroban = RobustSorobanServer(server_url=self.set_config()["blockchain_url"])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
