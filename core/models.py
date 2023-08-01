@@ -46,9 +46,9 @@ class GovernanceType(ChoiceEnum):
 
 class Governance(TimestampableMixin):
     dao = models.OneToOneField(Dao, related_name="governance", on_delete=models.CASCADE)
-    type = models.CharField(choices=GovernanceType.as_choices(), max_length=128)
+    type = models.CharField(choices=GovernanceType.as_choices(), max_length=128, null=True)
     proposal_duration = models.IntegerField()
-    proposal_token_deposit = utils.BiggerIntField()
+    proposal_token_deposit = utils.BiggerIntField(null=True)
     minimum_majority = models.IntegerField()
 
 

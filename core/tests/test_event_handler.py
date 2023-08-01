@@ -510,8 +510,6 @@ class EventHandlerTest(IntegrationTestCase):
                 {
                     "dao_id": "dao1",
                     "proposal_duration": 1,
-                    "proposal_token_deposit": 2,
-                    "proposal_voting_type": ["MAJORITY"],
                 },
                 {
                     "dao_id": "dao2",
@@ -525,9 +523,9 @@ class EventHandlerTest(IntegrationTestCase):
             models.Governance(
                 dao_id="dao1",
                 proposal_duration=1,
-                proposal_token_deposit=2,
+                proposal_token_deposit=None,
                 minimum_majority=0,
-                type=models.GovernanceType.MAJORITY_VOTE,
+                type=None,
             ),
             models.Governance(
                 dao_id="dao2",
