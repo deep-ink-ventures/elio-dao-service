@@ -33,6 +33,7 @@ expected_dao1_res = {
     "creator_id": "acc1",
     "owner_id": "acc1",
     "asset_id": "1",
+    "asset_address": "a1",
     "proposal_duration": 10,
     "proposal_token_deposit": 123,
     "min_threshold_configuration": 50,
@@ -48,6 +49,7 @@ expected_dao2_res = {
     "creator_id": "acc2",
     "owner_id": "acc2",
     "asset_id": "2",
+    "asset_address": "a2",
     "proposal_duration": 15,
     "proposal_token_deposit": 234,
     "min_threshold_configuration": 45,
@@ -294,6 +296,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc2",
                     "asset_id": None,
+                    "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -314,6 +317,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc2",
                     "asset_id": None,
+                    "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -338,6 +342,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc2",
                     "asset_id": None,
+                    "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -374,6 +379,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc2",
                     "owner_id": "acc2",
                     "asset_id": "4",
+                    "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -390,6 +396,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc1",
                     "asset_id": "3",
+                    "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -412,6 +419,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc2",
                     "owner_id": "acc2",
                     "asset_id": "4",
+                    "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -427,6 +435,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc1",
                     "asset_id": "3",
+                    "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -451,6 +460,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc2",
                     "owner_id": "acc2",
                     "asset_id": "4",
+                    "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -467,6 +477,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc1",
                     "asset_id": "3",
+                    "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
                     "min_threshold_configuration": None,
@@ -487,8 +498,8 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Dao.objects.create(
             id="dao4", contract_id="contract4", name="dao4 name", creator_id="acc2", owner_id="acc2"
         )
-        models.Asset.objects.create(id="3", owner_id="acc1", dao_id="dao3", total_supply=100)
-        models.Asset.objects.create(id="4", owner_id="acc2", dao_id="dao4", total_supply=200)
+        models.Asset.objects.create(id="3", address="a3", owner_id="acc1", dao_id="dao3", total_supply=100)
+        models.Asset.objects.create(id="4", address="a4", owner_id="acc2", dao_id="dao4", total_supply=200)
         models.AssetHolding.objects.create(asset_id="3", owner_id="acc3", balance=100)
         models.AssetHolding.objects.create(asset_id="4", owner_id="acc3", balance=200)
 

@@ -61,6 +61,7 @@ class AccountSerializerList(ModelSerializer):
 class DaoSerializer(ModelSerializer):
     owner_id = CharField(required=True)
     asset_id = CharField(source="asset.id", required=False)
+    asset_address = CharField(source="asset.address", required=False)
     proposal_duration = IntegerField(source="governance.proposal_duration", help_text="Proposal duration in blocks.")
     proposal_token_deposit = IntegerField(
         source="governance.proposal_token_deposit",
@@ -81,6 +82,7 @@ class DaoSerializer(ModelSerializer):
             "creator_id",
             "owner_id",
             "asset_id",
+            "asset_address",
             "proposal_duration",
             "proposal_token_deposit",
             "min_threshold_configuration",
