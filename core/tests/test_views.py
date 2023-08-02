@@ -132,7 +132,7 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.data, expected_res)
 
     def test_block_metadata_header(self):
-        cache.set(key="current_block", value=1)
+        cache.set(key="current_block_number", value=1)
 
         with self.assertNumQueries(0):
             res = self.client.get(reverse("core-welcome"))
@@ -148,6 +148,7 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.data, expected_res)
 
     def test_config(self):
+        cache.set(key="current_block_number", value=123)
         expected_res = {
             "deposit_to_create_dao": settings.DEPOSIT_TO_CREATE_DAO,
             "deposit_to_create_proposal": settings.DEPOSIT_TO_CREATE_PROPOSAL,
@@ -157,6 +158,11 @@ class CoreViewSetTest(IntegrationTestCase):
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
             "blockchain_url": settings.BLOCKCHAIN_URL,
             "network_passphrase": settings.NETWORK_PASSPHRASE,
+            "current_block_number": 123,
+            "horizon_server_standalone": "https://node.elio-dao.org/",
+            "horizon_server_futurenet": "https://horizon-futurenet.stellar.org/",
+            "horizon_server_testnet": "https://horizon-testnet.stellar.org/",
+            "horizon_server_mainnet": "https://horizon.stellar.org/",
         }
 
         with self.assertNumQueries(0):

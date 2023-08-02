@@ -95,6 +95,11 @@ def config(request, *args, **kwargs):
             "deposit_to_create_dao": settings.DEPOSIT_TO_CREATE_DAO,
             "deposit_to_create_proposal": settings.DEPOSIT_TO_CREATE_PROPOSAL,
             "block_creation_interval": settings.BLOCK_CREATION_INTERVAL,
+            "current_block_number": cache.get("current_block_number"),
+            "horizon_server_standalone": "https://node.elio-dao.org/",
+            "horizon_server_futurenet": "https://horizon-futurenet.stellar.org/",
+            "horizon_server_testnet": "https://horizon-testnet.stellar.org/",
+            "horizon_server_mainnet": "https://horizon.stellar.org/",
             **soroban_service.set_config(),
         }
     )

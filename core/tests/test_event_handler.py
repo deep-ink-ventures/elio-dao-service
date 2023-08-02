@@ -1040,7 +1040,7 @@ class EventHandlerTest(IntegrationTestCase):
             mock.assert_not_called()
         block.refresh_from_db()
         self.assertTrue(block.executed)
-        self.assertEqual(cache.get("current_block"), 0)
+        self.assertEqual(cache.get("current_block_number"), 0)
 
     @patch("core.event_handler.logger")
     @patch("core.event_handler.slack_logger")

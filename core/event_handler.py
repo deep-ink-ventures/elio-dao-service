@@ -443,7 +443,7 @@ class SorobanEventHandler:
 
         block.executed = True
         block.save(update_fields=["executed"])
-        cache.set(key="current_block", value=block.number)
+        cache.set(key="current_block_number", value=block.number)
 
 
 soroban_event_handler = SorobanEventHandler()
