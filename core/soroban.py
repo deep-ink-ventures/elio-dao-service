@@ -79,16 +79,17 @@ def retry(description: str):
             max_delay = retry_delays[-1]
             retry_delays = iter(retry_delays)
 
-            def log_and_sleep(err_msg: str, log_exception=False, stop_at_max_retry=False):
+            def log_and_sleep(err_msg: str, log_exception=False, stop_at_max_retry=False, log_to_slack=True):
+                _logger = slack_logger if log_to_slack else logger
                 retry_delay = next(retry_delays, max_delay)
                 if stop_at_max_retry and retry_delay == max_delay:
                     logger.error("Breaking retry.")
                     raise OutOfSyncException
                 err_msg = f"{err_msg} while {description}. Retrying in {retry_delay}s ..."
                 if log_exception:
-                    slack_logger.exception(err_msg)
+                    _logger.exception(err_msg)
                 else:
-                    slack_logger.error(err_msg)
+                    _logger.error(err_msg)
                 time.sleep(retry_delay)
 
             while True:
@@ -97,7 +98,9 @@ def retry(description: str):
                 except RequestException as exc:
                     match exc.message:
                         case "start is after newest ledger":
-                            log_and_sleep("RequestException (ahead of chain)", stop_at_max_retry=True)
+                            log_and_sleep(
+                                "RequestException (ahead of chain)", stop_at_max_retry=True, log_to_slack=False
+                            )
                         case "start is before oldest ledger":
                             raise NoLongerAvailableException
                         case "404 Not Found":

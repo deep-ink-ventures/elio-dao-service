@@ -156,10 +156,10 @@ class SorobanTest(IntegrationTestCase):
 
         expected_err_msg = "RequestException (ahead of chain) while some description. Retrying in %ss ..."
         self.assertExactCalls(
-            slack_logger_mock.error,
-            [*[call(expected_err_msg % i) for i in range(1, 4)]],
+            logger_mock.error,
+            [*[call(expected_err_msg % i) for i in range(1, 4)], call("Breaking retry.")],
         )
-        self.assertExactCalls(logger_mock.error, [call("Breaking retry.")])
+        slack_logger_mock.assert_not_called()
 
     def test_retry_no_longer_available(self):
         def func():
