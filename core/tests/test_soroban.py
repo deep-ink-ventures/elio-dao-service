@@ -142,9 +142,10 @@ class SorobanTest(IntegrationTestCase):
 
         self.assertEqual(unpack_scval(input_value), expected, input_value)
 
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
     @patch("core.soroban.time.sleep")
-    def test_retry_ahead_of_chain(self, sleep_mock, logger_mock):
+    def test_retry_ahead_of_chain(self, sleep_mock, logger_mock, slack_logger_mock):
         sleep_mock.side_effect = None, None, None, Exception("break retry")
 
         def func():
@@ -155,8 +156,10 @@ class SorobanTest(IntegrationTestCase):
 
         expected_err_msg = "RequestException (ahead of chain) while some description. Retrying in %ss ..."
         self.assertExactCalls(
-            logger_mock.error, [*[call(expected_err_msg % i) for i in range(1, 4)], call("Breaking retry.")]
+            slack_logger_mock.error,
+            [*[call(expected_err_msg % i) for i in range(1, 4)]],
         )
+        self.assertExactCalls(logger_mock.error, [call("Breaking retry.")])
 
     def test_retry_no_longer_available(self):
         def func():
@@ -165,7 +168,7 @@ class SorobanTest(IntegrationTestCase):
         with self.assertRaises(NoLongerAvailableException):
             retry("some description")(func)()
 
-    @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.time.sleep")
     def test_retry_404(self, sleep_mock, logger_mock):
         sleep_mock.side_effect = None, None, Exception("break retry")
@@ -179,7 +182,7 @@ class SorobanTest(IntegrationTestCase):
         expected_err_msg = "RequestException (404) while some description. Retrying in %ss ..."
         logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
 
-    @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.time.sleep")
     def test_retry_other_request_exception(self, sleep_mock, logger_mock):
         sleep_mock.side_effect = None, None, Exception("break retry")
@@ -193,7 +196,7 @@ class SorobanTest(IntegrationTestCase):
         expected_err_msg = "RequestException (some err) while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
 
-    @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.time.sleep")
     def test_retry_unexpected_err(self, sleep_mock, logger_mock):
         sleep_mock.side_effect = None, None, Exception("break retry")
@@ -324,7 +327,7 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.called_once_with(1)
 
     @patch("core.soroban.SorobanService.sleep")
-    @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     def test_clear_db_and_cache(self, logger_mock, sleep_mock):
         models.Contract.objects.create(id="c1")
         models.Account.objects.create(address="acc1")
@@ -830,12 +833,14 @@ class SorobanTest(IntegrationTestCase):
     @patch("core.soroban.SorobanService.find_start_ledger")
     @patch("core.soroban.SorobanService.fetch_event_data")
     @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.SorobanService.sleep")
     @patch("core.soroban.time.time")
     def test_listen_restarting(
         self,
         time_mock,
         sleep_mock,
+        slack_logger_mock,
         logger_mock,
         fetch_event_data_mock,
         find_start_ledger_mock,
@@ -863,6 +868,7 @@ class SorobanTest(IntegrationTestCase):
                 call("Listening... Latest block number: 51"),
             ]
         )
+        slack_logger_mock.info.assert_called_once_with("DB and chain are out of sync! Recreating DB...")
         find_start_ledger_mock.assert_called_once_with()
         fetch_event_data_mock.assert_has_calls(
             [

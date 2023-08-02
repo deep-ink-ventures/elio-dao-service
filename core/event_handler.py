@@ -15,6 +15,7 @@ from stellar_sdk import StrKey
 from core import models, tasks
 
 logger = logging.getLogger("alerts")
+slack_logger = logging.getLogger("alerts.slack")
 
 
 class ParseBlockException(Exception):
@@ -179,6 +180,7 @@ class SorobanEventHandler:
         """
         asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
         asset_ids_to_owner_ids: DefaultDict = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
+        asset_id: str
         accs = set()
         # contract_id becomes asset_id
         for asset_id, transfers in event_data.items():
@@ -431,11 +433,11 @@ class SorobanEventHandler:
                     action(event_data=events_by_contract_id, block=block)
                 except IntegrityError:
                     msg = "IntegrityError" + error_base
-                    logger.exception(msg)
+                    slack_logger.exception(msg)
                     raise ParseBlockException(msg)
                 except Exception:  # noqa E722
                     msg = "Unexpected error" + error_base
-                    logger.exception(msg)
+                    slack_logger.exception(msg)
                     raise ParseBlockException(msg)
 
         block.executed = True

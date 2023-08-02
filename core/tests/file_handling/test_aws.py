@@ -26,7 +26,7 @@ class AWSTest(UnitTestCase):
         )
         self.assertEqual(res, "https://bucket1.s3.region1.amazonaws.com/store/here")
 
-    @patch("core.file_handling.aws.logger")
+    @patch("core.file_handling.aws.slack_logger")
     def test_upload_file_fail(self, logger_mock):
         self.s3_client.client.upload_fileobj.side_effect = ClientError({"Error": {"Code": 123}}, "upload_fileobj")
         kwargs = {
@@ -50,7 +50,7 @@ class AWSTest(UnitTestCase):
         bucket().objects.filter.assert_called_once_with(Prefix="some_folder/")
         bucket().objects.filter().delete.assert_called_once_with()
 
-    @patch("core.file_handling.aws.logger")
+    @patch("core.file_handling.aws.slack_logger")
     def test_delete_file_fail(self, logger_mock):
         self.s3_client.resource.Bucket().objects.filter().delete.side_effect = ClientError(
             {"Error": {"Code": 123}}, "delete"

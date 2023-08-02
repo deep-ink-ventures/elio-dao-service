@@ -4,7 +4,7 @@ from celery import shared_task
 
 from core import models
 
-logger = logging.getLogger("alerts")
+slack_logger = logging.getLogger("alerts.slack")
 
 
 @shared_task()
@@ -33,9 +33,9 @@ def update_dao_metadata(dao_metadata: dict):
         try:
             dao.metadata = file_handler.download_metadata(url=metadata_url, metadata_hash=metadata_hash)
         except HashMismatchException:
-            logger.error("Hash mismatch while fetching DAO metadata from provided url.")
+            slack_logger.error("Hash mismatch while fetching DAO metadata from provided url.")
         except Exception:  # noqa E722
-            logger.exception("Unexpected error while fetching DAO metadata from provided url.")
+            slack_logger.exception("Unexpected error while fetching DAO metadata from provided url.")
 
     if daos_to_update:
         models.Dao.objects.bulk_update(daos_to_update, fields=["metadata", "metadata_url", "metadata_hash"])
@@ -62,9 +62,9 @@ def update_proposal_metadata(proposal_ids: list):
                 url=proposal.metadata_url, metadata_hash=proposal.metadata_hash
             )
         except HashMismatchException:
-            logger.error("Hash mismatch while fetching Proposal metadata from provided url.")
+            slack_logger.error("Hash mismatch while fetching Proposal metadata from provided url.")
         except Exception:  # noqa E722
-            logger.exception("Unexpected error while fetching Proposal metadata from provided url.")
+            slack_logger.exception("Unexpected error while fetching Proposal metadata from provided url.")
         else:
             proposal_to_update.append(proposal)
     if proposal_to_update:

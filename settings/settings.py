@@ -120,10 +120,14 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
 
+SLACK_DEFAULT_URL = os.environ.get("SLACK_DEFAULT_URL")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "handlers": {
+        "slack": {"class": "core.management.logger.slack.SlackHandler"},
+        "console": {"class": "logging.StreamHandler"},
+    },
     "loggers": {
         "django.request": {
             "handlers": ["console"],
@@ -132,6 +136,11 @@ LOGGING = {
         },
         "alerts": {
             "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": True,
+        },
+        "alerts.slack": {
+            "handlers": ["slack"],
             "level": LOG_LEVEL,
             "propagate": True,
         },

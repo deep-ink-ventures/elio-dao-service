@@ -22,6 +22,7 @@ from core import models as core_models
 from core.event_handler import soroban_event_handler
 
 logger = getLogger("alerts")
+slack_logger = getLogger("alerts.slack")
 
 
 def unpack_scval(val: SCVal):
@@ -85,9 +86,9 @@ def retry(description: str):
                     raise OutOfSyncException
                 err_msg = f"{err_msg} while {description}. Retrying in {retry_delay}s ..."
                 if log_exception:
-                    logger.exception(err_msg)
+                    slack_logger.exception(err_msg)
                 else:
-                    logger.error(err_msg)
+                    slack_logger.error(err_msg)
                 time.sleep(retry_delay)
 
             while True:
@@ -200,7 +201,7 @@ class SorobanService(object):
 
         empties db, fetches seed accounts, sleeps if start_time was given, returns start Block
         """
-        logger.info("DB and chain are out of sync! Recreating DB...")
+        slack_logger.info("DB and chain are out of sync! Recreating DB...")
         cache.clear()
         with connection.cursor() as cursor:
             cursor.execute(

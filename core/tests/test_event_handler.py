@@ -343,7 +343,7 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     @patch("core.file_handling.file_handler.urlopen")
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     def test__set_dao_metadata_hash_mismatch(self, logger_mock, urlopen_mock):
         models.Account.objects.create(address="acc3")
         models.Dao.objects.create(
@@ -390,7 +390,7 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     @patch("core.file_handling.file_handler.FileHandler.download_metadata")
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     def test__set_dao_metadata_exception(self, logger_mock, download_metadata_mock):
         models.Account.objects.create(address="acc3")
         models.Dao.objects.create(
@@ -654,7 +654,7 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.assert_has_calls([call("url1"), call("url2")], any_order=True)
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     @patch("core.file_handling.file_handler.urlopen")
     def test__proposal_set_metadata_hash_mismatch(self, urlopen_mock, logger_mock):
         models.Account.objects.create(address="acc3")
@@ -715,7 +715,7 @@ class EventHandlerTest(IntegrationTestCase):
 
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     @patch("core.file_handling.file_handler.FileHandler.download_metadata")
     def test__proposals_set_metadata_exception(self, download_metadata_mock, logger_mock):
         models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
@@ -774,7 +774,7 @@ class EventHandlerTest(IntegrationTestCase):
         )
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     @patch("core.file_handling.file_handler.FileHandler.download_metadata")
     def test__create_proposals_everything_failed(self, download_metadata_mock, logger_mock):
         models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
@@ -1039,8 +1039,9 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertEqual(cache.get("current_block"), 0)
 
     @patch("core.event_handler.logger")
+    @patch("core.event_handler.slack_logger")
     @patch("core.event_handler.SorobanEventHandler._create_daos")
-    def test_execute_actions_db_error(self, action_mock, logger_mock):
+    def test_execute_actions_db_error(self, action_mock, slack_logger_mock, logger_mock):
         block = models.Block.objects.create(number=0, event_data=[["c1", "e1", ["DAO", "created"], {"d": 1}]])
         action_mock.side_effect = IntegrityError
 
@@ -1050,11 +1051,19 @@ class EventHandlerTest(IntegrationTestCase):
         block.refresh_from_db()
         self.assertFalse(block.executed)
         action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
-        logger_mock.exception.assert_called_once_with("IntegrityError during block execution. Block number: 0.")
+        self.assertExactCalls(
+            logger_mock.info,
+            [
+                call("Executing event_data... Block number: 0"),
+                call("Contract ID: c1 | Event ID: e1 | Topics: ['DAO', 'created'] | Values: {'d': 1}"),
+            ],
+        )
+        slack_logger_mock.exception.assert_called_once_with("IntegrityError during block execution. Block number: 0.")
 
     @patch("core.event_handler.logger")
+    @patch("core.event_handler.slack_logger")
     @patch("core.event_handler.SorobanEventHandler._delete_daos")
-    def test_execute_actions_unexpected_error(self, action_mock, logger_mock):
+    def test_execute_actions_unexpected_error(self, action_mock, slack_logger_mock, logger_mock):
         block = models.Block.objects.create(number=0, event_data=[["c1", "e1", ["DAO", "destroyed"], {"d": 1}]])
         action_mock.side_effect = Exception
 
@@ -1064,7 +1073,14 @@ class EventHandlerTest(IntegrationTestCase):
         block.refresh_from_db()
         self.assertFalse(block.executed)
         action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
-        logger_mock.exception.assert_called_once_with("Unexpected error during block execution. Block number: 0.")
+        self.assertExactCalls(
+            logger_mock.info,
+            [
+                call("Executing event_data... Block number: 0"),
+                call("Contract ID: c1 | Event ID: e1 | Topics: ['DAO', 'destroyed'] | Values: {'d': 1}"),
+            ],
+        )
+        slack_logger_mock.exception.assert_called_once_with("Unexpected error during block execution. Block number: 0.")
 
     @patch("core.event_handler.logger")
     def test_execute_actions_not_implemented(self, logger_mock):
