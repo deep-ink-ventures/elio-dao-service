@@ -135,6 +135,7 @@ class SorobanEventHandler:
             assets.append(
                 models.Asset(
                     id=binascii.hexlify(StrKey.decode_contract(asset_id)).decode(),
+                    address=asset_id,
                     dao_id=dao_id,
                     owner_id=owner_id,
                     total_supply=0,

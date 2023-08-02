@@ -153,12 +153,14 @@ class EventHandlerTest(IntegrationTestCase):
         expected_assets = [
             models.Asset(
                 id="1bc539fc7adb3cc7e6e524e2851ee98d648aa20cff35a1dc261556bc76077bc4",
+                address="CAN4KOP4PLNTZR7G4USOFBI65GGWJCVCBT7TLIO4EYKVNPDWA554IOV5",
                 total_supply=0,
                 owner_id="acc1",
                 dao_id="dao1",
             ),
             models.Asset(
                 id="7bfbd989bb57991c2b5b34b3869c1b69407b8a74e81bb11d9e07a5b2f24fcab8",
+                address="CB57XWMJXNLZSHBLLM2LHBU4DNUUA64KOTUBXMI5TYD2LMXSJ7FLRIXD",
                 total_supply=0,
                 owner_id="acc2",
                 dao_id="dao2",

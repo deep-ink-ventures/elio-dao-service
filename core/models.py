@@ -54,6 +54,7 @@ class Governance(TimestampableMixin):
 
 class Asset(TimestampableMixin):
     id = models.CharField(max_length=128, primary_key=True)  # soroban asset contract_id
+    address = models.CharField(max_length=128)
     total_supply = utils.BiggerIntField()
     dao = models.OneToOneField(Dao, related_name="asset", on_delete=models.CASCADE)
     owner = models.ForeignKey(Account, related_name="assets", on_delete=models.CASCADE)

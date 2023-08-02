@@ -88,8 +88,8 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Governance.objects.create(
             dao_id="dao2", proposal_duration=15, proposal_token_deposit=234, min_threshold_configuration=45
         )
-        models.Asset.objects.create(id=1, owner_id="acc1", dao_id="dao1", total_supply=1000)
-        models.Asset.objects.create(id=2, owner_id="acc2", dao_id="dao2", total_supply=200)
+        models.Asset.objects.create(id="1", address="a1", owner_id="acc1", dao_id="dao1", total_supply=1000)
+        models.Asset.objects.create(id="2", address="a2", owner_id="acc2", dao_id="dao2", total_supply=200)
         models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=500)
         models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=300)
         models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=100)
@@ -643,7 +643,7 @@ class CoreViewSetTest(IntegrationTestCase):
     #     )
 
     def test_asset_get(self):
-        expected_res = {"id": "1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
+        expected_res = {"id": "1", "address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
 
         with self.assertNumQueries(1):
             res = self.client.get(reverse("core-asset-detail", kwargs={"pk": 1}))
@@ -653,8 +653,8 @@ class CoreViewSetTest(IntegrationTestCase):
     def test_asset_get_list(self):
         expected_res = wrap_in_pagination_res(
             [
-                {"id": "1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
-                {"id": "2", "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
+                {"id": "1", "address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
+                {"id": "2", "address": "a2", "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
             ]
         )
         with self.assertNumQueries(2):
