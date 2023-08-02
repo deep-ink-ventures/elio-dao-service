@@ -143,7 +143,11 @@ API documentation: `/redoc/`
 - SLACK_DEFAULT_URL
   - type: str
   - optional
-  - incoming slack webhook url used by `alerts.slack` logger 
+  - incoming slack webhook url used by `alerts.slack` logger
+- CONFIG_SECRET
+  - type: str
+  - only required for the usage of the `/update-config/` endpoint
+  - used as authorization for said endpoint, provided as request header: `Config-Secret`
 ### Blockchain
 - BLOCKCHAIN_URL
   - type: str
