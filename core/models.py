@@ -49,7 +49,7 @@ class Governance(TimestampableMixin):
     type = models.CharField(choices=GovernanceType.as_choices(), max_length=128, null=True)
     proposal_duration = models.IntegerField()
     proposal_token_deposit = utils.BiggerIntField(null=True)
-    minimum_majority = models.IntegerField()
+    min_threshold_configuration = models.BigIntegerField()
 
 
 class Asset(TimestampableMixin):

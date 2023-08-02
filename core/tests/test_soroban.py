@@ -346,7 +346,7 @@ class SorobanTest(IntegrationTestCase):
             dao_id="dao1",
             proposal_duration=1,
             proposal_token_deposit=2,
-            minimum_majority=3,
+            min_threshold_configuration=3,
             type=models.GovernanceType.MAJORITY_VOTE,
         )
         models.Vote.objects.create(voter_id="acc1", proposal_id="prop1", in_favor=True, voting_power=10)

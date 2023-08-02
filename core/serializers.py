@@ -64,11 +64,12 @@ class DaoSerializer(ModelSerializer):
     proposal_duration = IntegerField(source="governance.proposal_duration", help_text="Proposal duration in blocks.")
     proposal_token_deposit = IntegerField(
         source="governance.proposal_token_deposit",
-        help_text="Token deposit required to create a Poposal",
+        help_text="Token deposit required to create a Proposal",
         required=False,
     )
-    minimum_majority_per_1024 = IntegerField(
-        source="governance.minimum_majority", help_text="ayes >= nays + token_supply / 1024 * minimum_majority_per_1024"
+    min_threshold_configuration = IntegerField(
+        source="governance.min_threshold_configuration",
+        help_text="ayes >= nays + token_supply / 1024 * min_threshold_configuration",
     )
 
     class Meta:
@@ -82,7 +83,7 @@ class DaoSerializer(ModelSerializer):
             "asset_id",
             "proposal_duration",
             "proposal_token_deposit",
-            "minimum_majority_per_1024",
+            "min_threshold_configuration",
             "setup_complete",
             "metadata",
             "metadata_url",

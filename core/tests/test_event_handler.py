@@ -510,12 +510,14 @@ class EventHandlerTest(IntegrationTestCase):
                 {
                     "dao_id": "dao1",
                     "proposal_duration": 1,
+                    "min_threshold_configuration": 2,
                 },
                 {
                     "dao_id": "dao2",
                     "proposal_duration": 4,
                     "proposal_token_deposit": 5,
                     "proposal_voting_type": ["MAJORITY"],
+                    "min_threshold_configuration": 6,
                 },
             ]
         }
@@ -524,15 +526,15 @@ class EventHandlerTest(IntegrationTestCase):
                 dao_id="dao1",
                 proposal_duration=1,
                 proposal_token_deposit=None,
-                minimum_majority=0,
                 type=None,
+                min_threshold_configuration=2,
             ),
             models.Governance(
                 dao_id="dao2",
                 proposal_duration=4,
                 proposal_token_deposit=5,
-                minimum_majority=0,
                 type=models.GovernanceType.MAJORITY_VOTE,
+                min_threshold_configuration=6,
             ),
         ]
 

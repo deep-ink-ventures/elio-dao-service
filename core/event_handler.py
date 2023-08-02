@@ -250,7 +250,7 @@ class SorobanEventHandler:
                     dao_id=values["dao_id"],
                     proposal_duration=values["proposal_duration"],
                     proposal_token_deposit=values.get("proposal_token_deposit"),
-                    minimum_majority=0,  # noqa: E501 todo waiting for https://github.com/deep-ink-ventures/elio-dao-protocol/issues/45
+                    min_threshold_configuration=values["min_threshold_configuration"],
                     type={"MAJORITY": models.GovernanceType.MAJORITY_VOTE}.get(
                         (proposal_voting_type := values.get("proposal_voting_type")) and proposal_voting_type[0]
                     ),
