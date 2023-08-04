@@ -626,10 +626,10 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
         event_data = {
             "1": [
-                {"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1},
+                {"proposal_id": "1", "url": "url1", "hash": metadata_hash_1},
             ],
             "2": [
-                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+                {"proposal_id": "2", "url": "url2", "hash": metadata_hash_2},
             ],
         }
         expected_proposals = [
@@ -675,10 +675,10 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
         event_data = {
             "1": [
-                {"proposal_id": ["1"], "url": "url1", "hash": "wrong hash"},
+                {"proposal_id": "1", "url": "url1", "hash": "wrong hash"},
             ],
             "2": [
-                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+                {"proposal_id": "2", "url": "url2", "hash": metadata_hash_2},
             ],
         }
         expected_proposals = [
@@ -738,8 +738,8 @@ class EventHandlerTest(IntegrationTestCase):
 
         download_metadata_mock.side_effect = download_metadata
         event_data = {
-            "1": [{"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1}],
-            "2": [{"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2}],
+            "1": [{"proposal_id": "1", "url": "url1", "hash": metadata_hash_1}],
+            "2": [{"proposal_id": "2", "url": "url2", "hash": metadata_hash_2}],
         }
 
         expected_proposals = [
@@ -793,10 +793,10 @@ class EventHandlerTest(IntegrationTestCase):
         download_metadata_mock.side_effect = Exception
         event_data = {
             "1": [
-                {"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1},
+                {"proposal_id": "1", "url": "url1", "hash": metadata_hash_1},
             ],
             "2": [
-                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+                {"proposal_id": "2", "url": "url2", "hash": metadata_hash_2},
             ],
         }
         expected_proposals = [
@@ -848,11 +848,11 @@ class EventHandlerTest(IntegrationTestCase):
         models.Vote.objects.create(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None)
         event_data = {
             "c1": [
-                {"proposal_id": ["prop1"], "voter_id": "acc1", "in_favor": True, "not": "interesting"},
-                {"proposal_id": ["prop1"], "voter_id": "acc2", "in_favor": False, "not": "interesting"},
-                {"proposal_id": ["prop1"], "voter_id": "acc3", "in_favor": False, "not": "interesting"},
-                {"proposal_id": ["prop2"], "voter_id": "acc1", "in_favor": True, "not": "interesting"},
-                {"proposal_id": ["prop2"], "voter_id": "acc2", "in_favor": True, "not": "interesting"},
+                {"proposal_id": "prop1", "voter_id": "acc1", "in_favor": True, "not": "interesting"},
+                {"proposal_id": "prop1", "voter_id": "acc2", "in_favor": False, "not": "interesting"},
+                {"proposal_id": "prop1", "voter_id": "acc3", "in_favor": False, "not": "interesting"},
+                {"proposal_id": "prop2", "voter_id": "acc1", "in_favor": True, "not": "interesting"},
+                {"proposal_id": "prop2", "voter_id": "acc2", "in_favor": True, "not": "interesting"},
             ],
         }
         expected_votes = [
@@ -884,11 +884,11 @@ class EventHandlerTest(IntegrationTestCase):
         models.Proposal.objects.create(id="prop7", dao_id="dao2", birth_block_number=10)
         event_data = {
             "c1": [
-                {"proposal_id": ["prop1"], "status": ["Accepted"]},
-                {"proposal_id": ["prop3"], "status": ["Accepted"]},
-                {"proposal_id": ["prop4"], "status": ["Implemented"]},
-                {"proposal_id": ["prop2"], "status": ["Rejected"]},
-                {"proposal_id": ["prop5"], "status": ["Rejected"]},
+                {"proposal_id": "prop1", "status": ["Accepted"]},
+                {"proposal_id": "prop3", "status": ["Accepted"]},
+                {"proposal_id": "prop4", "status": ["Implemented"]},
+                {"proposal_id": "prop2", "status": ["Rejected"]},
+                {"proposal_id": "prop5", "status": ["Rejected"]},
             ],
         }
         expected_proposals = [
@@ -915,9 +915,9 @@ class EventHandlerTest(IntegrationTestCase):
         models.Proposal.objects.create(id="prop5", dao_id="dao2", birth_block_number=10)
         event_data = {
             "c1": [
-                {"proposal_id": ["prop1"], "reason": "reason 1", "not": "interesting"},
-                {"proposal_id": ["prop2"], "reason": "reason 2", "not": "interesting"},
-                {"proposal_id": ["prop3"], "reason": "reason 3", "not": "interesting"},
+                {"proposal_id": "prop1", "reason": "reason 1", "not": "interesting"},
+                {"proposal_id": "prop2", "reason": "reason 2", "not": "interesting"},
+                {"proposal_id": "prop3", "reason": "reason 3", "not": "interesting"},
             ]
         }
         expected_proposals = [

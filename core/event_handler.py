@@ -310,7 +310,7 @@ class SorobanEventHandler:
         set Proposals' metadata based on event data
         """
         if proposal_data := {
-            str(values["proposal_id"][0]): (values["url"], values["hash"]) for values in chain(*event_data.values())
+            str(values["proposal_id"]): (values["url"], values["hash"]) for values in chain(*event_data.values())
         }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=proposal_data.keys())):
                 proposal.metadata_url, proposal.metadata_hash = proposal_data[proposal.id]
@@ -328,7 +328,7 @@ class SorobanEventHandler:
         """
         proposal_ids_to_voting_data = collections.defaultdict(dict)  # {proposal_id: {voter_id: in_favor}}
         for values in chain(*event_data.values()):
-            proposal_ids_to_voting_data[str(values["proposal_id"][0])][values["voter_id"]] = values["in_favor"]
+            proposal_ids_to_voting_data[str(values["proposal_id"])][values["voter_id"]] = values["in_favor"]
         if proposal_ids_to_voting_data:
             for vote in (
                 votes_to_update := models.Vote.objects.filter(
@@ -359,7 +359,7 @@ class SorobanEventHandler:
         """
         proposal_id_to_status = {}
         for values in chain(*event_data.values()):
-            proposal_id_to_status[str(values["proposal_id"][0])] = {
+            proposal_id_to_status[str(values["proposal_id"])] = {
                 "Accepted": models.ProposalStatus.PENDING,
                 "Rejected": models.ProposalStatus.REJECTED,
                 "Implemented": models.ProposalStatus.IMPLEMENTED,
@@ -378,7 +378,7 @@ class SorobanEventHandler:
         faults Proposals' based on event data
         """
         if faulted_proposals := {
-            str(values["proposal_id"][0]): values["reason"] for values in chain(*event_data.values())
+            str(values["proposal_id"]): values["reason"] for values in chain(*event_data.values())
         }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=faulted_proposals.keys())):
                 proposal.fault = faulted_proposals[proposal.id]
