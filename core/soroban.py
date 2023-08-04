@@ -106,7 +106,10 @@ def retry(description: str):
                         case "404 Not Found":
                             log_and_sleep("RequestException (404)")
                         case _:
-                            log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
+                            if exc.code == 502:
+                                log_and_sleep("RequestException (502 Bad Gateway)", log_to_slack=False)
+                            else:
+                                log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
                     log_and_sleep("Unexpected error", log_exception=True)
 
