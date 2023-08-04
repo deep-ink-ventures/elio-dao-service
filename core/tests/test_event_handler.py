@@ -1099,3 +1099,20 @@ class EventHandlerTest(IntegrationTestCase):
             "NotImplementedError during block execution. Block number: 0. "
             "No action defined for topics: ('DAO', 'crangled')."
         )
+
+    @patch("core.event_handler.logger")
+    def test_execute_actions_not_implemented_fns(self, logger_mock):
+        block = models.Block.objects.create(
+            number=0,
+            event_data=[
+                ["c1", "e1", ["fn_call", "crangled"], {"d": 1}],
+                ["c1", "e1", ["fn_return", "crangled"], {"d": 1}],
+            ],
+        )
+
+        with self.assertNumQueries(3):
+            SorobanEventHandler().execute_actions(block)
+
+        block.refresh_from_db()
+        self.assertTrue(block.executed)
+        logger_mock.error.assert_not_called()

@@ -145,9 +145,10 @@ class RobustSorobanServer(SorobanServer):
         try:
             response = Response[response_body_type, str].parse_obj(data.json())
         except JSONDecodeError:
-            raise RequestException(data.status_code, data.text)
+            slack_logger.info(data.__dict__)
+            raise RequestException(code=data.status_code, message=data.text)
         if response.error:
-            raise RequestException(response.error.code, response.error.message)
+            raise RequestException(code=response.error.code, message=response.error.message)
         return response.result
 
 

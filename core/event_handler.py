@@ -408,7 +408,8 @@ class SorobanEventHandler:
                 topics = topics[0], topics[1]
                 action = self.topics_to_action[topics]
             except Exception:  # noqa E722
-                logger.error(f"NotImplementedError{error_base} No action defined for topics: {topics}.")
+                if not topics[0] in ("fn_call", "fn_return"):
+                    logger.error(f"NotImplementedError{error_base} No action defined for topics: {topics}.")
             else:
                 try:
                     action(event_data=events_by_contract_id, block=block)
