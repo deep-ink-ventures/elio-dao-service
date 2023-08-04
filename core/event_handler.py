@@ -277,7 +277,7 @@ class SorobanEventHandler:
             dao_ids.add(dao_id)
             proposals.append(
                 models.Proposal(
-                    id=str(values["proposal_id"][0]),
+                    id=str(values["proposal_id"]),
                     dao_id=dao_id,
                     creator_id=values["owner_id"],
                     birth_block_number=block.number,

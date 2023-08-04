@@ -35,7 +35,7 @@ class ConfigSerializer(Serializer):  # noqa
     assets_wasm_hash = CharField()
     blockchain_url = CharField()
     network_passphrase = CharField()
-    current_block_number = IntegerField()
+    current_block_number = IntegerField(allow_null=True, required=False)
     horizon_server_standalone = CharField()
     horizon_server_futurenet = CharField()
     horizon_server_testnet = CharField()

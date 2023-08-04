@@ -584,8 +584,8 @@ class EventHandlerTest(IntegrationTestCase):
         models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=30)
         models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=20)
         event_data = {
-            "1": [{"proposal_id": ["prop1"], "dao_id": "dao1", "owner_id": "acc1"}],
-            "2": [{"proposal_id": ["prop2"], "dao_id": "dao2", "owner_id": "acc2"}],
+            "1": [{"proposal_id": "prop1", "dao_id": "dao1", "owner_id": "acc1"}],
+            "2": [{"proposal_id": "prop2", "dao_id": "dao2", "owner_id": "acc2"}],
         }
         expected_proposals = [
             models.Proposal(id="prop1", dao_id="dao1", creator_id="acc1", birth_block_number=123),
