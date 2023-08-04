@@ -363,7 +363,7 @@ class SorobanService(object):
             if cache.get("restart_listener"):
                 logger.info("Restarting listener...")
                 self.soroban.close()
-                self.soroban = retry("reinitializing blockchain connection")(SorobanServer)(
+                self.soroban = retry("reinitializing blockchain connection")(RobustSorobanServer)(
                     server_url=self.set_config()["blockchain_url"]
                 )
                 cache.delete("restart_listener")

@@ -5,11 +5,9 @@ from functools import partial, reduce
 from itertools import chain
 from typing import DefaultDict
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Q
-from django.utils import timezone
 from stellar_sdk import StrKey
 
 from core import models, tasks
@@ -291,24 +289,6 @@ class SorobanEventHandler:
                 "asset__dao_id", "owner_id", "balance"
             ):
                 dao_id_to_holding_data[dao_id].append((owner_id, balance))
-
-            # TODO
-            # dao_id_to_proposal_duration = {
-            #     dao_id: proposal_duration
-            #     for dao_id, proposal_duration in models.Governance.objects.filter(dao_id__in=dao_ids).values_list(
-            #         "dao_id", "proposal_duration"
-            #     )
-            # }
-
-            # set end dates for proposals
-            # current time + proposal duration in block * block creation interval
-            proposal_duration = 10_000
-            # finalization_duration = 5_000
-            # proposal_max_nr = 25
-            for proposal in proposals:
-                proposal.ends_at = timezone.now() + timezone.timedelta(
-                    seconds=proposal_duration * settings.BLOCK_CREATION_INTERVAL
-                )
 
             models.Proposal.objects.bulk_create(proposals)
             # for all proposals: create a Vote placeholder for each Account holding tokens (AssetHoldings) of the
