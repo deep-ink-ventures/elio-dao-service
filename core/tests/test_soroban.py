@@ -137,10 +137,13 @@ class SorobanTest(IntegrationTestCase):
             "<SCVal [type=21, nonce_key=<SCNonceKey [nonce=<Int64 [int64=123]>]>]>",
         ),
     )
-    def test_unpack_scval(self, case):
+    @patch("core.soroban.slack_logger")
+    def test_unpack_scval(self, case, slack_logger):
         input_value, expected = case
 
         self.assertEqual(unpack_scval(input_value), expected, input_value)
+        if isinstance(expected, str) and "SCVal" in expected:
+            slack_logger.error.assert_called_once_with(f"Unhandled SCValType: {expected}")
 
     @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
@@ -195,6 +198,24 @@ class SorobanTest(IntegrationTestCase):
             retry("some description")(func)()
 
         expected_err_msg = "RequestException (502 Bad Gateway) while some description. Retrying in %ss ..."
+        logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+        slack_logger_mock.assert_not_called()
+
+    @patch("core.soroban.slack_logger")
+    @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    def test_retry_503(self, sleep_mock, logger_mock, slack_logger_mock):
+        sleep_mock.side_effect = None, None, Exception("break retry")
+
+        def func():
+            raise RequestException(message="wall of text", code=503)
+
+        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+            retry("some description")(func)()
+
+        expected_err_msg = (
+            "RequestException (503 Service Temporarily Unavailable) while some description. Retrying in %ss ..."
+        )
         logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
         slack_logger_mock.assert_not_called()
 
