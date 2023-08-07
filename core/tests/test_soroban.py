@@ -398,7 +398,9 @@ class SorobanTest(IntegrationTestCase):
             soroban_service.clear_db_and_cache(start_time=1)
 
         sleep_mock.assert_called_once_with(start_time=1)
-        logger_mock.info.assert_called_once_with("DB and chain are out of sync! Recreating DB...")
+        logger_mock.info.assert_called_once_with(
+            "Service and chain are out of sync! Recreating DB, clearing cache, restarting listener..."
+        )
         self.assertIsNone(cache.get(key="some_key"))
         self.assertTrue(cache.get(key="restart_listener"))
         for model in (
@@ -414,6 +416,40 @@ class SorobanTest(IntegrationTestCase):
             models.Governance,
         ):
             self.assertListEqual(list(model.objects.all()), [])
+
+    @patch("core.soroban.slack_logger")
+    def test_clear_db_and_cache_new_config(self, slack_logger):
+        soroban_service.set_config(
+            data={
+                "core_contract_address": "a",
+                "votes_contract_address": "b",
+                "assets_wasm_hash": "c",
+                "blockchain_url": "d",
+                "network_passphrase": "e",
+            }
+        )
+
+        with self.assertNumQueries(1):
+            soroban_service.clear_db_and_cache(
+                start_time=1,
+                new_config={
+                    "core_contract_address": "1",
+                    "votes_contract_address": "2",
+                },
+            )
+        self.assertEqual(
+            soroban_service.set_config(),
+            {
+                "core_contract_address": "1",
+                "votes_contract_address": "2",
+                "assets_wasm_hash": "some_wasm_hash",
+                "blockchain_url": "https://rpc-futurenet.stellar.org",
+                "network_passphrase": "Test SDF Future Network ; October 2022",
+            },
+        )
+        slack_logger.info.assert_called_once_with(
+            "Service and chain are out of sync! Recreating DB, clearing cache, restarting listener..."
+        )
 
     @data(
         # input_data, current_cache, expected_res
@@ -906,7 +942,9 @@ class SorobanTest(IntegrationTestCase):
                 call("Listening... Latest block number: 51"),
             ]
         )
-        slack_logger_mock.info.assert_called_once_with("DB and chain are out of sync! Recreating DB...")
+        slack_logger_mock.info.assert_called_once_with(
+            "Service and chain are out of sync! Recreating DB, clearing cache, restarting listener..."
+        )
         find_start_ledger_mock.assert_called_once_with()
         fetch_event_data_mock.assert_has_calls(
             [

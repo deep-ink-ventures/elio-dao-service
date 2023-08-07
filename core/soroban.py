@@ -208,15 +208,21 @@ class SorobanService(object):
         if elapsed_time < settings.BLOCK_CREATION_INTERVAL:
             time.sleep(settings.BLOCK_CREATION_INTERVAL - elapsed_time)
 
-    def clear_db_and_cache(self, start_time: float = None):
+    def clear_db_and_cache(self, start_time: float = None, new_config: dict = None):
         """
         Args:
             start_time: time since last block was fetched from chain
+            new_config: new config to set
 
-        empties db, fetches seed accounts, sleeps if start_time was given, returns start Block
+        empties db & clears cache.
+        sets flag to restart the listener.
+        sets new_config if given.
+        sleeps if start_time was given.
         """
-        slack_logger.info("DB and chain are out of sync! Recreating DB...")
+        slack_logger.info("Service and chain are out of sync! Recreating DB, clearing cache, restarting listener...")
         cache.clear()
+        if new_config:
+            self.set_config(data=new_config)
         with connection.cursor() as cursor:
             cursor.execute(
                 """

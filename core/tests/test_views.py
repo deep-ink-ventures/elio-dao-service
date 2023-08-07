@@ -171,10 +171,9 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertDictEqual(res.data, expected_res)
 
-    @patch("core.soroban.SorobanService.set_config")
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.views.slack_logger")
-    def test_update_config(self, slack_logger_mock, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
+    def test_update_config(self, slack_logger_mock, clear_db_and_cache_mock):
         expected_res = {
             "core_contract_address": "c",
             "votes_contract_address": "v",
@@ -200,8 +199,7 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_200_OK)
         self.assertDictEqual(res.data, expected_res)
-        clear_db_and_cache_mock.assert_called_once_with()
-        set_trusted_contract_ids_mock.assert_called_once_with(data=expected_res)
+        clear_db_and_cache_mock.assert_called_once_with(new_config=expected_res)
         slack_logger_mock.info.assert_called_once_with(
             "New deployment! :happy_sheep:", extra={"channel": "some url", "disable_formatting": True}
         )

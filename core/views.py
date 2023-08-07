@@ -126,8 +126,7 @@ def update_config(request, *args, **kwargs):
 
     serializer = serializers.UpdateConfigSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    soroban_service.clear_db_and_cache()
-    soroban_service.set_config(data=serializer.data)
+    soroban_service.clear_db_and_cache(new_config=serializer.data)
     slack_logger.info(
         "New deployment! :happy_sheep:", extra={"channel": settings.SLACK_ELIO_URL, "disable_formatting": True}
     )
