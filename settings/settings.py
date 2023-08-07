@@ -121,6 +121,7 @@ AUTH_PASSWORD_VALIDATORS = [
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
 
 SLACK_DEFAULT_URL = os.environ.get("SLACK_DEFAULT_URL")
+SLACK_ELIO_URL = os.environ.get("SLACK_ELIO_URL")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -8,6 +8,7 @@ from unittest.mock import PropertyMock, patch
 from ddt import data, ddt
 from django.conf import settings
 from django.core.cache import cache
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework.exceptions import ErrorDetail
 from rest_framework.status import (  # todo HTTP_403_FORBIDDEN,
@@ -172,7 +173,8 @@ class CoreViewSetTest(IntegrationTestCase):
 
     @patch("core.soroban.SorobanService.set_config")
     @patch("core.soroban.SorobanService.clear_db_and_cache")
-    def test_update_config(self, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
+    @patch("core.views.slack_logger")
+    def test_update_config(self, slack_logger_mock, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
         expected_res = {
             "core_contract_address": "c",
             "votes_contract_address": "v",
@@ -185,7 +187,7 @@ class CoreViewSetTest(IntegrationTestCase):
             "network_passphrase2": "n",
         }
 
-        with self.assertNumQueries(0):
+        with self.assertNumQueries(0), override_settings(SLACK_ELIO_URL="some url"):
             res = self.client.patch(
                 reverse("core-update-config"),
                 data={
@@ -200,6 +202,9 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.data, expected_res)
         clear_db_and_cache_mock.assert_called_once_with()
         set_trusted_contract_ids_mock.assert_called_once_with(data=expected_res)
+        slack_logger_mock.info.assert_called_once_with(
+            "New deployment! :happy_sheep:", extra={"channel": "some url", "disable_formatting": True}
+        )
 
     @patch("core.soroban.SorobanService.set_trusted_contract_ids")
     @patch("core.soroban.SorobanService.clear_db_and_cache")

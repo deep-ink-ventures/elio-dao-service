@@ -75,3 +75,29 @@ class LoggerTest(UnitTestCase):
             },
             headers={"Content-Type": "application/json"},
         )
+
+    @patch("core.management.logger.slack.requests.post")
+    def test_slack_logger_disable_formatting(self, post_mock):
+        self.slack_logger.info("testing", extra={"disable_formatting": True})
+
+        post_mock.assert_called_once_with(
+            settings.SLACK_DEFAULT_URL,
+            json={
+                "text": "testing\n*Config*:\n",
+                "attachments": self.attachments,
+            },
+            headers={"Content-Type": "application/json"},
+        )
+
+    @patch("core.management.logger.slack.requests.post")
+    def test_slack_logger_channel(self, post_mock):
+        self.slack_logger.info("testing", extra={"channel": "some channel"})
+
+        post_mock.assert_called_once_with(
+            "some channel",
+            json={
+                "text": "*INFO*:\n```testing```\n*Config*:\n",
+                "attachments": self.attachments,
+            },
+            headers={"Content-Type": "application/json"},
+        )

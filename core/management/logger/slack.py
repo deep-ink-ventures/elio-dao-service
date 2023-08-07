@@ -14,17 +14,20 @@ class SlackHandler(logging.Handler):
     def emit(self, record: logging.LogRecord):
         from core.soroban import soroban_service
 
-        if not self.url:
+        if not (url := getattr(record, "channel", None) or self.url):
             return
 
-        txt = f"*{record.levelname}*:\n```{record.msg}```"
+        if getattr(record, "disable_formatting", None):
+            txt = f"{record.msg}"
+        else:
+            txt = f"*{record.levelname}*:\n```{record.msg}```"
         if record.exc_info:
             txt += f"\n*Traceback*:\n```{self.format(record=record).lstrip(record.msg)}```"
 
         txt += "\n*Config*:\n"
-        txt = {
+        json = {
             "text": txt,
             "attachments": [{"fields": [{"title": k, "value": v} for k, v in soroban_service.set_config().items()]}],
         }
 
-        requests.post(self.url, json=txt, headers={"Content-Type": "application/json"})
+        requests.post(url, json=json, headers={"Content-Type": "application/json"})

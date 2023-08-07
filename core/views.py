@@ -1,3 +1,4 @@
+import logging
 import secrets
 from itertools import chain
 
@@ -31,6 +32,8 @@ from core.view_utils import (
     signed_by_token_holder,
     swagger_query_param,
 )
+
+slack_logger = logging.getLogger("alerts.slack")
 
 
 @swagger_auto_schema(
@@ -125,6 +128,9 @@ def update_config(request, *args, **kwargs):
     serializer.is_valid(raise_exception=True)
     soroban_service.clear_db_and_cache()
     soroban_service.set_config(data=serializer.data)
+    slack_logger.info(
+        "New deployment! :happy_sheep:", extra={"channel": settings.SLACK_ELIO_URL, "disable_formatting": True}
+    )
     return Response(data=serializer.data, status=HTTP_200_OK)
 
 
