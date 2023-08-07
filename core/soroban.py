@@ -31,6 +31,8 @@ def unpack_scval(val: SCVal):
             return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
         case SCValType.SCV_VEC:
             return [unpack_scval(entry) for entry in val.vec.sc_vec]
+        case SCValType.SCV_VOID:
+            return
         case SCValType.SCV_BOOL:
             return val.b
         case SCValType.SCV_SYMBOL:

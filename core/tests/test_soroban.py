@@ -55,6 +55,7 @@ class SorobanTest(IntegrationTestCase):
     @data(
         # input, expected output
         (SCVal(SCValType.SCV_BOOL, b=True), True),
+        (SCVal(SCValType.SCV_VOID), None),
         (SCVal(SCValType.SCV_SYMBOL, sym=SCSymbol(sc_symbol="AbC".encode())), "AbC"),
         (SCVal(SCValType.SCV_BYTES, bytes=SCBytes(sc_bytes="AbC\n".encode())), "AbC"),
         (
