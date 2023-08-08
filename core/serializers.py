@@ -189,6 +189,7 @@ class VotesSerializer(Serializer):  # noqa
 
 class ProposalSerializer(ModelSerializer):
     votes = VotesSerializer()
+    birth_block_number = IntegerField(min_value=0)
 
     class Meta:
         model = models.Proposal
