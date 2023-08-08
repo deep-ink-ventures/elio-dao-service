@@ -394,8 +394,13 @@ class SorobanService(object):
                 logger.info(f"Listening... Latest block number: {latest_block_number}")
                 try:
                     latest_block_number = self.fetch_event_data(start_ledger=latest_block_number)
-                except (IntegrityError, OutOfSyncException):
-                    self.clear_db_and_cache(start_time=start_time)
+                except IntegrityError:
+                    slack_logger.exception("IntegrityError")
+                    self.clear_db_and_cache(start_time=start_time, new_config=self.set_config())
+                    latest_block_number = self.find_start_ledger()
+                except OutOfSyncException:
+                    slack_logger.exception("OutOfSyncException")
+                    self.clear_db_and_cache(start_time=start_time, new_config=self.set_config())
                     latest_block_number = self.find_start_ledger()
                 except NoLongerAvailableException:
                     latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)

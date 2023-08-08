@@ -829,15 +829,68 @@ class SorobanTest(IntegrationTestCase):
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.soroban.SorobanService.find_start_ledger")
     @patch("core.soroban.SorobanService.fetch_event_data")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
     @patch("core.soroban.time.sleep")
     @patch("core.soroban.time.time")
-    def test_listen_integrity_err(
-        self, time_mock, sleep_mock, logger_mock, fetch_event_data_mock, find_start_ledger_mock, clear_db_and_cache_mock
+    def test_listen_IntegrityError(
+        self,
+        time_mock,
+        sleep_mock,
+        logger_mock,
+        slack_logger_mock,
+        fetch_event_data_mock,
+        find_start_ledger_mock,
+        clear_db_and_cache_mock,
     ):
         time_mock.return_value = 10
         sleep_mock.side_effect = BreakRetry
         fetch_event_data_mock.side_effect = IntegrityError
+        models.Block.objects.create(number=0, executed=True)
+        expected_config = {
+            "core_contract_address": "a",
+            "votes_contract_address": "b",
+            "assets_wasm_hash": "some_wasm_hash",
+            "blockchain_url": "https://rpc-futurenet.stellar.org",
+            "network_passphrase": "Test SDF Future Network ; October 2022",
+        }
+        soroban_service.set_config(
+            data={
+                "core_contract_address": "a",
+                "votes_contract_address": "b",
+            }
+        )
+
+        with self.assertRaises(BreakRetry):
+            soroban_service.listen()
+
+        logger_mock.info.assert_called_once_with("Listening... Latest block number: 1")
+        find_start_ledger_mock.assert_called_once_with()
+        slack_logger_mock.exception.assert_called_once_with("IntegrityError")
+        clear_db_and_cache_mock.assert_called_once_with(start_time=10, new_config=expected_config)
+        fetch_event_data_mock.assert_called_once_with(start_ledger=1)
+        self.assertEqual(soroban_service.set_config(), expected_config)
+
+    @patch("core.soroban.SorobanService.clear_db_and_cache")
+    @patch("core.soroban.SorobanService.find_start_ledger")
+    @patch("core.soroban.SorobanService.fetch_event_data")
+    @patch("core.soroban.slack_logger")
+    @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    @patch("core.soroban.time.time")
+    def test_listen_OutOfSyncException(
+        self,
+        time_mock,
+        sleep_mock,
+        logger_mock,
+        slack_logger_mock,
+        fetch_event_data_mock,
+        find_start_ledger_mock,
+        clear_db_and_cache_mock,
+    ):
+        time_mock.return_value = 10
+        sleep_mock.side_effect = BreakRetry
+        fetch_event_data_mock.side_effect = OutOfSyncException
         models.Block.objects.create(number=0, executed=True)
 
         with self.assertRaises(BreakRetry):
@@ -845,7 +898,8 @@ class SorobanTest(IntegrationTestCase):
 
         logger_mock.info.assert_called_once_with("Listening... Latest block number: 1")
         find_start_ledger_mock.assert_called_once_with()
-        clear_db_and_cache_mock.assert_called_once_with(start_time=10)
+        slack_logger_mock.exception.assert_called_once_with("OutOfSyncException")
+        clear_db_and_cache_mock.assert_called_once_with(start_time=10, new_config=soroban_service.set_config())
         fetch_event_data_mock.assert_called_once_with(start_ledger=1)
 
     @patch("core.soroban.SorobanService.clear_db_and_cache")
