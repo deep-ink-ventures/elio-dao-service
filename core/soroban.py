@@ -400,8 +400,7 @@ class SorobanService(object):
                     latest_block_number = self.find_start_ledger()
                 except OutOfSyncException:
                     slack_logger.exception("OutOfSyncException")
-                    self.clear_db_and_cache(start_time=start_time, new_config=self.set_config())
-                    latest_block_number = self.find_start_ledger()
+                    cache.set(key="restart_listener", value=True)
                 except NoLongerAvailableException:
                     latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
                 else:

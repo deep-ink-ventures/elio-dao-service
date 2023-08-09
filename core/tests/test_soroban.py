@@ -871,8 +871,6 @@ class SorobanTest(IntegrationTestCase):
         fetch_event_data_mock.assert_called_once_with(start_ledger=1)
         self.assertEqual(soroban_service.set_config(), expected_config)
 
-    @patch("core.soroban.SorobanService.clear_db_and_cache")
-    @patch("core.soroban.SorobanService.find_start_ledger")
     @patch("core.soroban.SorobanService.fetch_event_data")
     @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
@@ -885,8 +883,6 @@ class SorobanTest(IntegrationTestCase):
         logger_mock,
         slack_logger_mock,
         fetch_event_data_mock,
-        find_start_ledger_mock,
-        clear_db_and_cache_mock,
     ):
         time_mock.return_value = 10
         sleep_mock.side_effect = BreakRetry
@@ -897,10 +893,9 @@ class SorobanTest(IntegrationTestCase):
             soroban_service.listen()
 
         logger_mock.info.assert_called_once_with("Listening... Latest block number: 1")
-        find_start_ledger_mock.assert_called_once_with()
         slack_logger_mock.exception.assert_called_once_with("OutOfSyncException")
-        clear_db_and_cache_mock.assert_called_once_with(start_time=10, new_config=soroban_service.set_config())
         fetch_event_data_mock.assert_called_once_with(start_ledger=1)
+        self.assertTrue(cache.get(key="restart_listener"))
 
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.soroban.SorobanService.find_start_ledger")
