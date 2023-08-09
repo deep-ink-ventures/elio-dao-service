@@ -317,10 +317,6 @@ class ProposalViewSet(ReadOnlyModelViewSet, SearchableMixin):
         metadata = file_handler.upload_metadata(
             metadata=serializer.validated_data, storage_destination=f"{proposal.dao_id}/proposals/{proposal.id}"
         )
-        proposal.metadata = metadata["metadata"]
-        proposal.metadata_url = metadata["metadata_url"]
-        proposal.metadata_hash = metadata["metadata_hash"]
-        proposal.save(update_fields=["metadata", "metadata_url", "metadata_hash"])
         return Response(metadata, status=HTTP_201_CREATED)
 
     @swagger_auto_schema(
