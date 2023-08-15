@@ -569,45 +569,56 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     def test__create_proposals(self):
-        models.Account.objects.create(address="acc3")
+        acc3 = models.Account.objects.create(address="acc3")
         models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
-        models.Asset.objects.create(id=1, dao_id="dao1", owner_id="acc1", total_supply=100)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=50)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=30)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=20)
-        models.Asset.objects.create(id=2, dao_id="dao2", owner_id="acc2", total_supply=100)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=30)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc1", balance=20)
-        models.Asset.objects.create(id=3, dao_id="dao3", owner_id="acc3", total_supply=100)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=30)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=20)
+        models.Asset.objects.create(id=1, dao_id="dao1", owner_id="acc1", total_supply=6)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=1)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=2)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=3)
+        models.Asset.objects.create(id=2, dao_id="dao2", owner_id="acc2", total_supply=15)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc1", balance=4)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=5)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=6)
+        models.Asset.objects.create(id=3, dao_id="dao3", owner_id="acc3", total_supply=26)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=7)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=8)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=9)
         event_data = {
             "1": [{"proposal_id": "prop1", "dao_id": "dao1", "owner_id": "acc1"}],
-            "2": [{"proposal_id": "prop2", "dao_id": "dao2", "owner_id": "acc2"}],
+            "2": [
+                {"proposal_id": "prop2", "dao_id": "dao2", "owner_id": "acc2"},
+                {"proposal_id": "prop3", "dao_id": "dao2", "owner_id": "acc4"},
+            ],
         }
         expected_proposals = [
             models.Proposal(id="prop1", dao_id="dao1", creator_id="acc1", birth_block_number=123),
             models.Proposal(id="prop2", dao_id="dao2", creator_id="acc2", birth_block_number=123),
+            models.Proposal(id="prop3", dao_id="dao2", creator_id="acc4", birth_block_number=123),
         ]
         expected_votes = [
-            models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=None),
-            models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=None),
-            models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=None),
-            models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None),
-            models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=None),
-            models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=1, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=2, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=3, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=4, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=5, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=6, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc4", voting_power=0, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc1", voting_power=4, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc2", voting_power=5, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc3", voting_power=6, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc4", voting_power=0, in_favor=None),
         ]
+        expected_accs = [self.acc1, self.acc2, acc3, models.Account(address="acc4")]
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(7):
             soroban_event_handler._create_proposals(
                 event_data=event_data, block=models.Block.objects.create(number=123)
             )
 
+        self.assertModelsEqual(models.Account.objects.order_by("address"), expected_accs)
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
         self.assertModelsEqual(
-            models.Vote.objects.order_by("proposal_id", "-voting_power"),
+            models.Vote.objects.order_by("proposal_id", "voter_id"),
             expected_votes,
             ignore_fields=("created_at", "updated_at", "id"),
         )

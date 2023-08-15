@@ -269,21 +269,39 @@ class SorobanEventHandler:
 
         create Proposals based on event data
         """
-        proposals = []
+        acc_ids = set()
         dao_ids = set()
-
+        proposals = []
         for values in chain(*event_data.values()):
-            dao_id = values["dao_id"]
-            dao_ids.add(dao_id)
+            acc_ids.add(values["owner_id"])
+            dao_ids.add(values["dao_id"])
             proposals.append(
                 models.Proposal(
                     id=str(values["proposal_id"]),
-                    dao_id=dao_id,
+                    dao_id=values["dao_id"],
                     creator_id=values["owner_id"],
                     birth_block_number=block.number,
                 )
             )
         if proposals:
+            # gracefully create potentially missing accounts and corresponding asset holdings for each proposal
+            models.Account.objects.bulk_create(
+                [models.Account(address=acc_id) for acc_id in acc_ids], ignore_conflicts=True
+            )
+            dao_id_to_asset_id = {
+                vals["dao_id"]: vals["id"]
+                for vals in models.Asset.objects.filter(dao_id__in=dao_ids).values("id", "dao_id")
+            }
+            models.AssetHolding.objects.bulk_create(
+                [
+                    models.AssetHolding(
+                        owner_id=proposal.creator_id, asset_id=dao_id_to_asset_id[proposal.dao_id], balance=0
+                    )
+                    for proposal in proposals
+                ],
+                ignore_conflicts=True,
+            )
+
             dao_id_to_holding_data: DefaultDict = collections.defaultdict(list)
             for dao_id, owner_id, balance in models.AssetHolding.objects.filter(asset__dao__id__in=dao_ids).values_list(
                 "asset__dao_id", "owner_id", "balance"
