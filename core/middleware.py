@@ -13,6 +13,6 @@ class HealthCheckMiddleware(MiddlewareMixin):
 class BlockMetadataMiddleware(MiddlewareMixin):
     @staticmethod
     def process_response(_request, response):
-        if current_block := cache.get("current_block"):
-            response.headers["Block-Number"] = current_block
+        if current_block_number := cache.get("current_block_number"):
+            response.headers["Block-Number"] = current_block_number
         return response

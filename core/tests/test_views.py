@@ -7,6 +7,7 @@ from unittest.mock import PropertyMock, patch
 from ddt import data, ddt
 from django.conf import settings
 from django.core.cache import cache
+from django.test import override_settings
 from django.urls import reverse
 from rest_framework.exceptions import ErrorDetail
 from rest_framework.status import (
@@ -33,9 +34,10 @@ expected_dao1_res = {
     "creator_id": "acc1",
     "owner_id": "acc1",
     "asset_id": "1",
+    "asset_address": "a1",
     "proposal_duration": 10,
     "proposal_token_deposit": 123,
-    "minimum_majority_per_1024": 50,
+    "min_threshold_configuration": 50,
     "setup_complete": False,
     "metadata": {"some": "data"},
     "metadata_url": None,
@@ -48,9 +50,10 @@ expected_dao2_res = {
     "creator_id": "acc2",
     "owner_id": "acc2",
     "asset_id": "2",
+    "asset_address": "a2",
     "proposal_duration": 15,
     "proposal_token_deposit": 234,
-    "minimum_majority_per_1024": 45,
+    "min_threshold_configuration": 45,
     "setup_complete": False,
     "metadata": None,
     "metadata_url": None,
@@ -80,16 +83,16 @@ class CoreViewSetTest(IntegrationTestCase):
             metadata={"some": "data"},
         )
         models.Governance.objects.create(
-            dao_id="dao1", proposal_duration=10, proposal_token_deposit=123, minimum_majority=50
+            dao_id="dao1", proposal_duration=10, proposal_token_deposit=123, min_threshold_configuration=50
         )
         models.Dao.objects.create(
             id="dao2", contract_id="contract2", name="dao2 name", creator_id="acc2", owner_id="acc2"
         )
         models.Governance.objects.create(
-            dao_id="dao2", proposal_duration=15, proposal_token_deposit=234, minimum_majority=45
+            dao_id="dao2", proposal_duration=15, proposal_token_deposit=234, min_threshold_configuration=45
         )
-        models.Asset.objects.create(id=1, owner_id="acc1", dao_id="dao1", total_supply=1000)
-        models.Asset.objects.create(id=2, owner_id="acc2", dao_id="dao2", total_supply=200)
+        models.Asset.objects.create(id="1", address="a1", owner_id="acc1", dao_id="dao1", total_supply=1000)
+        models.Asset.objects.create(id="2", address="a2", owner_id="acc2", dao_id="dao2", total_supply=200)
         models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=500)
         models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=300)
         models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=100)
@@ -114,6 +117,7 @@ class CoreViewSetTest(IntegrationTestCase):
             fault="some reason",
             status=models.ProposalStatus.FAULTED,
             birth_block_number=15,
+            setup_complete=True,
         )
         models.Vote.objects.create(proposal_id="prop1", voter_id="acc1", in_favor=True, voting_power=500)
         models.Vote.objects.create(proposal_id="prop1", voter_id="acc2", in_favor=True, voting_power=300)
@@ -129,7 +133,7 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.data, expected_res)
 
     def test_block_metadata_header(self):
-        cache.set(key="current_block", value=1)
+        cache.set(key="current_block_number", value=1)
 
         with self.assertNumQueries(0):
             res = self.client.get(reverse("core-welcome"))
@@ -145,6 +149,7 @@ class CoreViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.data, expected_res)
 
     def test_config(self):
+        cache.set(key="current_block_number", value=123)
         expected_res = {
             "deposit_to_create_dao": settings.DEPOSIT_TO_CREATE_DAO,
             "deposit_to_create_proposal": settings.DEPOSIT_TO_CREATE_PROPOSAL,
@@ -152,6 +157,13 @@ class CoreViewSetTest(IntegrationTestCase):
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "blockchain_url": settings.BLOCKCHAIN_URL,
+            "network_passphrase": settings.NETWORK_PASSPHRASE,
+            "current_block_number": 123,
+            "horizon_server_standalone": "https://node.elio-dao.org/",
+            "horizon_server_futurenet": "https://horizon-futurenet.stellar.org/",
+            "horizon_server_testnet": "https://horizon-testnet.stellar.org/",
+            "horizon_server_mainnet": "https://horizon.stellar.org/",
         }
 
         with self.assertNumQueries(0):
@@ -159,20 +171,26 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertDictEqual(res.data, expected_res)
 
-    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
     @patch("core.soroban.SorobanService.clear_db_and_cache")
-    def test_update_config(self, clear_db_and_cache_mock, set_trusted_contract_ids_mock):
+    @patch("core.views.slack_logger")
+    def test_update_config(self, slack_logger_mock, clear_db_and_cache_mock):
         expected_res = {
             "core_contract_address": "c",
             "votes_contract_address": "v",
             "assets_wasm_hash": "a",
+            "blockchain_url": "b",
+            "network_passphrase": "n",
+        }
+        payload = {
+            **expected_res,
+            "network_passphrase2": "n",
         }
 
-        with self.assertNumQueries(0):
+        with self.assertNumQueries(0), override_settings(SLACK_ELIO_URL="some url"):
             res = self.client.patch(
                 reverse("core-update-config"),
                 data={
-                    **expected_res,
+                    **payload,
                     "not": "interesting",
                 },
                 content_type="application/json",
@@ -181,11 +199,10 @@ class CoreViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_200_OK)
         self.assertDictEqual(res.data, expected_res)
-        clear_db_and_cache_mock.assert_called_once_with()
-        set_trusted_contract_ids_mock.assert_called_once_with()
-        self.assertEqual(settings.CORE_CONTRACT_ADDRESS, "c")
-        self.assertEqual(settings.VOTES_CONTRACT_ADDRESS, "v")
-        self.assertEqual(settings.ASSETS_WASM_HASH, "a")
+        clear_db_and_cache_mock.assert_called_once_with(new_config=expected_res)
+        slack_logger_mock.info.assert_called_once_with(
+            "New deployment! :happy_sheep:", extra={"channel": "some url", "disable_formatting": True}
+        )
 
     @patch("core.soroban.SorobanService.set_trusted_contract_ids")
     @patch("core.soroban.SorobanService.clear_db_and_cache")
@@ -288,9 +305,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc2",
                     "asset_id": None,
+                    "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": True,
                     "metadata": None,
                     "metadata_url": None,
@@ -308,9 +326,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc2",
                     "asset_id": None,
+                    "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": True,
                     "metadata": None,
                     "metadata_url": None,
@@ -332,9 +351,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc2",
                     "asset_id": None,
+                    "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": True,
                     "metadata": None,
                     "metadata_url": None,
@@ -368,9 +388,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc2",
                     "owner_id": "acc2",
                     "asset_id": "4",
+                    "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": False,
                     "metadata": None,
                     "metadata_url": None,
@@ -384,9 +405,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc1",
                     "asset_id": "3",
+                    "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": False,
                     "metadata": None,
                     "metadata_url": None,
@@ -406,9 +428,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc2",
                     "owner_id": "acc2",
                     "asset_id": "4",
+                    "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": False,
                     "metadata": None,
                     "metadata_url": None,
@@ -421,9 +444,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc1",
                     "asset_id": "3",
+                    "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": False,
                     "metadata": None,
                     "metadata_url": None,
@@ -445,9 +469,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc2",
                     "owner_id": "acc2",
                     "asset_id": "4",
+                    "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": False,
                     "metadata": None,
                     "metadata_url": None,
@@ -461,9 +486,10 @@ class CoreViewSetTest(IntegrationTestCase):
                     "creator_id": "acc1",
                     "owner_id": "acc1",
                     "asset_id": "3",
+                    "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
-                    "minimum_majority_per_1024": None,
+                    "min_threshold_configuration": None,
                     "setup_complete": False,
                     "metadata": None,
                     "metadata_url": None,
@@ -481,8 +507,8 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Dao.objects.create(
             id="dao4", contract_id="contract4", name="dao4 name", creator_id="acc2", owner_id="acc2"
         )
-        models.Asset.objects.create(id="3", owner_id="acc1", dao_id="dao3", total_supply=100)
-        models.Asset.objects.create(id="4", owner_id="acc2", dao_id="dao4", total_supply=200)
+        models.Asset.objects.create(id="3", address="a3", owner_id="acc1", dao_id="dao3", total_supply=100)
+        models.Asset.objects.create(id="4", address="a4", owner_id="acc2", dao_id="dao4", total_supply=200)
         models.AssetHolding.objects.create(asset_id="3", owner_id="acc3", balance=100)
         models.AssetHolding.objects.create(asset_id="4", owner_id="acc3", balance=200)
 
@@ -636,7 +662,7 @@ class CoreViewSetTest(IntegrationTestCase):
         )
 
     def test_asset_get(self):
-        expected_res = {"id": 1, "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
+        expected_res = {"id": "1", "address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
 
         with self.assertNumQueries(1):
             res = self.client.get(reverse("core-asset-detail", kwargs={"pk": 1}))
@@ -646,8 +672,8 @@ class CoreViewSetTest(IntegrationTestCase):
     def test_asset_get_list(self):
         expected_res = wrap_in_pagination_res(
             [
-                {"id": 1, "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
-                {"id": 2, "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
+                {"id": "1", "address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
+                {"id": "2", "address": "a2", "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
             ]
         )
         with self.assertNumQueries(2):
@@ -667,6 +693,7 @@ class CoreViewSetTest(IntegrationTestCase):
             "status": models.ProposalStatus.RUNNING,
             "votes": {"pro": 800, "contra": 100, "abstained": 100, "total": 1000},
             "birth_block_number": 10,
+            "setup_complete": False,
         }
 
         with self.assertNumQueries(2):
@@ -688,6 +715,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "status": models.ProposalStatus.RUNNING,
                     "votes": {"pro": 800, "contra": 100, "abstained": 100, "total": 1000},
                     "birth_block_number": 10,
+                    "setup_complete": False,
                 },
                 {
                     "id": "prop2",
@@ -700,6 +728,7 @@ class CoreViewSetTest(IntegrationTestCase):
                     "status": models.ProposalStatus.FAULTED,
                     "votes": {"pro": 0, "contra": 200, "abstained": 0, "total": 200},
                     "birth_block_number": 15,
+                    "setup_complete": True,
                 },
             ]
         )

@@ -84,6 +84,7 @@ CACHES = {
     "default": {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": f"{redis}/1",
+        "TIMEOUT": None,
     },
 }
 
@@ -119,10 +120,15 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
 
+SLACK_DEFAULT_URL = os.environ.get("SLACK_DEFAULT_URL")
+SLACK_ELIO_URL = os.environ.get("SLACK_ELIO_URL")
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
-    "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "handlers": {
+        "slack": {"class": "core.management.logger.slack.SlackHandler"},
+        "console": {"class": "logging.StreamHandler"},
+    },
     "loggers": {
         "django.request": {
             "handlers": ["console"],
@@ -131,6 +137,11 @@ LOGGING = {
         },
         "alerts": {
             "handlers": ["console"],
+            "level": LOG_LEVEL,
+            "propagate": True,
+        },
+        "alerts.slack": {
+            "handlers": ["slack"],
             "level": LOG_LEVEL,
             "propagate": True,
         },
@@ -195,10 +206,11 @@ VOTES_CONTRACT_ADDRESS = os.environ.get("VOTES_CONTRACT")
 ASSETS_WASM_HASH = os.environ.get("ASSETS_WASM_HASH")
 SOROBAN_START_LEDGER = 600_000
 BLOCKCHAIN_URL = os.environ.get("BLOCKCHAIN_URL")
+NETWORK_PASSPHRASE = os.environ.get("NETWORK_PASSPHRASE")
 BLOCK_CREATION_INTERVAL = int(os.environ.get("BLOCK_CREATION_INTERVAL", 5))  # seconds
 RETRY_DELAYS = [int(_) for _ in os.environ.get("RETRY_DELAYS", "5,10,30,60,120").split(",")]
-DEPOSIT_TO_CREATE_DAO = 10_000_000_000_000
-DEPOSIT_TO_CREATE_PROPOSAL = 1_000_000_000_000
+DEPOSIT_TO_CREATE_DAO = 10_000_000_000
+DEPOSIT_TO_CREATE_PROPOSAL = 100_000
 TYPE_REGISTRY_PRESET = "polkadot"
 
 SWAGGER_SETTINGS = {

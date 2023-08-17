@@ -46,14 +46,15 @@ class GovernanceType(ChoiceEnum):
 
 class Governance(TimestampableMixin):
     dao = models.OneToOneField(Dao, related_name="governance", on_delete=models.CASCADE)
-    type = models.CharField(choices=GovernanceType.as_choices(), max_length=128)
-    proposal_duration = models.IntegerField()
-    proposal_token_deposit = utils.BiggerIntField()
-    minimum_majority = models.IntegerField()
+    type = models.CharField(choices=GovernanceType.as_choices(), max_length=128, null=True)
+    proposal_duration = utils.BiggerIntField()
+    proposal_token_deposit = utils.BiggerIntField(null=True)
+    min_threshold_configuration = utils.BiggerIntField()
 
 
 class Asset(TimestampableMixin):
     id = models.CharField(max_length=128, primary_key=True)  # soroban asset contract_id
+    address = models.CharField(max_length=128)
     total_supply = utils.BiggerIntField()
     dao = models.OneToOneField(Dao, related_name="asset", on_delete=models.CASCADE)
     owner = models.ForeignKey(Account, related_name="assets", on_delete=models.CASCADE)
@@ -92,10 +93,11 @@ class Proposal(TimestampableMixin):
     creator = models.ForeignKey(Account, related_name="proposals", on_delete=models.SET_NULL, null=True)
     status = models.CharField(max_length=16, choices=ProposalStatus.as_choices(), default=ProposalStatus.RUNNING)
     fault = models.TextField(null=True)
-    birth_block_number = models.PositiveBigIntegerField()
+    birth_block_number = utils.BiggerIntField()
     metadata = models.JSONField(null=True)
     metadata_url = models.CharField(max_length=256, null=True)
     metadata_hash = models.CharField(max_length=256, null=True)
+    setup_complete = models.BooleanField(default=False)
 
 
 class ProposalReport(TimestampableMixin):
@@ -111,7 +113,7 @@ class Vote(TimestampableMixin):
 
 
 class Block(TimestampableMixin):
-    number = models.BigIntegerField(unique=True, editable=False)
+    number = utils.BiggerIntField(unique=True, editable=False)
     event_data = models.JSONField(default=dict)
     executed = models.BooleanField(default=False, db_index=True)
 

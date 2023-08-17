@@ -7,6 +7,7 @@ from django.core.cache import cache
 from django.db import IntegrityError, connection
 from django.test import override_settings
 from stellar_sdk import Keypair, StrKey
+from stellar_sdk.client.response import Response
 from stellar_sdk.soroban.exceptions import RequestException
 from stellar_sdk.soroban.soroban_rpc import EventFilter
 from stellar_sdk.xdr import (
@@ -36,6 +37,8 @@ from stellar_sdk.xdr import (
 from core import models
 from core.soroban import (
     NoLongerAvailableException,
+    OutOfSyncException,
+    RobustSorobanServer,
     retry,
     soroban_service,
     unpack_scval,
@@ -52,6 +55,7 @@ class SorobanTest(IntegrationTestCase):
     @data(
         # input, expected output
         (SCVal(SCValType.SCV_BOOL, b=True), True),
+        (SCVal(SCValType.SCV_VOID), None),
         (SCVal(SCValType.SCV_SYMBOL, sym=SCSymbol(sc_symbol="AbC".encode())), "AbC"),
         (SCVal(SCValType.SCV_BYTES, bytes=SCBytes(sc_bytes="AbC\n".encode())), "AbC"),
         (
@@ -129,34 +133,37 @@ class SorobanTest(IntegrationTestCase):
         (
             SCVal(
                 SCValType.SCV_LEDGER_KEY_NONCE,
-                nonce_key=SCNonceKey(
-                    nonce_address=SCAddress(
-                        type=SCAddressType(SCAddressType.SC_ADDRESS_TYPE_CONTRACT),
-                        contract_id=Hash(hash="AbC".encode()),
-                    )
-                ),
+                nonce_key=SCNonceKey(nonce=Int64(int64=123)),
             ),
-            "<SCVal [type=21, nonce_key=<SCNonceKey [nonce_address=<SCAddress [type=1, contract_id=<Hash [hash=b'AbC']>]>]>]>",  # noqa
+            "<SCVal [type=21, nonce_key=<SCNonceKey [nonce=<Int64 [int64=123]>]>]>",
         ),
     )
-    def test_unpack_scval(self, case):
+    @patch("core.soroban.slack_logger")
+    def test_unpack_scval(self, case, slack_logger):
         input_value, expected = case
 
-        self.assertEqual(unpack_scval(input_value), expected)
+        self.assertEqual(unpack_scval(input_value), expected, input_value)
+        if isinstance(expected, str) and "SCVal" in expected:
+            slack_logger.error.assert_called_once_with(f"Unhandled SCValType: {expected}")
 
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
     @patch("core.soroban.time.sleep")
-    def test_retry_ahead_of_chain(self, sleep_mock, logger_mock):
-        sleep_mock.side_effect = None, None, Exception("break retry")
+    def test_retry_ahead_of_chain(self, sleep_mock, logger_mock, slack_logger_mock):
+        sleep_mock.side_effect = None, None, None, Exception("break retry")
 
         def func():
             raise RequestException(message="start is after newest ledger", code=0)
 
-        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+        with override_settings(RETRY_DELAYS=(1, 2, 3, 4)), self.assertRaises(OutOfSyncException):
             retry("some description")(func)()
 
         expected_err_msg = "RequestException (ahead of chain) while some description. Retrying in %ss ..."
-        logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+        self.assertExactCalls(
+            logger_mock.error,
+            [*[call(expected_err_msg % i) for i in range(1, 4)], call("Breaking retry.")],
+        )
+        slack_logger_mock.assert_not_called()
 
     def test_retry_no_longer_available(self):
         def func():
@@ -165,7 +172,55 @@ class SorobanTest(IntegrationTestCase):
         with self.assertRaises(NoLongerAvailableException):
             retry("some description")(func)()
 
+    @patch("core.soroban.slack_logger")
+    @patch("core.soroban.time.sleep")
+    def test_retry_404(self, sleep_mock, logger_mock):
+        sleep_mock.side_effect = None, None, Exception("break retry")
+
+        def func():
+            raise RequestException(message="404 Not Found", code=0)
+
+        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+            retry("some description")(func)()
+
+        expected_err_msg = "RequestException (404) while some description. Retrying in %ss ..."
+        logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    def test_retry_502(self, sleep_mock, logger_mock, slack_logger_mock):
+        sleep_mock.side_effect = None, None, Exception("break retry")
+
+        def func():
+            raise RequestException(message="wall of text", code=502)
+
+        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+            retry("some description")(func)()
+
+        expected_err_msg = "RequestException (502 Bad Gateway) while some description. Retrying in %ss ..."
+        logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+        slack_logger_mock.assert_not_called()
+
+    @patch("core.soroban.slack_logger")
+    @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    def test_retry_503(self, sleep_mock, logger_mock, slack_logger_mock):
+        sleep_mock.side_effect = None, None, Exception("break retry")
+
+        def func():
+            raise RequestException(message="wall of text", code=503)
+
+        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+            retry("some description")(func)()
+
+        expected_err_msg = (
+            "RequestException (503 Service Temporarily Unavailable) while some description. Retrying in %ss ..."
+        )
+        logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+        slack_logger_mock.assert_not_called()
+
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.time.sleep")
     def test_retry_other_request_exception(self, sleep_mock, logger_mock):
         sleep_mock.side_effect = None, None, Exception("break retry")
@@ -179,7 +234,7 @@ class SorobanTest(IntegrationTestCase):
         expected_err_msg = "RequestException (some err) while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
 
-    @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.time.sleep")
     def test_retry_unexpected_err(self, sleep_mock, logger_mock):
         sleep_mock.side_effect = None, None, Exception("break retry")
@@ -192,6 +247,52 @@ class SorobanTest(IntegrationTestCase):
 
         expected_err_msg = "Unexpected error while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+
+    def test_RobustSorobanServer__post(self):
+        client_mock = Mock()
+        client_mock.post.return_value.json.return_value = {
+            "id": "asd",
+            "jsonrpc": "2.0",
+            "result": "asd",
+        }
+        request_body = Mock()
+        server = RobustSorobanServer(server_url="some url", client=client_mock)
+
+        res = server._post(request_body=request_body, response_body_type=str)
+
+        self.assertEqual(res, "asd")
+
+    def test_RobustSorobanServer__post_error(self):
+        client_mock = Mock()
+        client_mock.post.return_value.json.return_value = {
+            "id": "asd",
+            "jsonrpc": "2.0",
+            "error": {"code": -32600, "message": "start is after newest ledger"},
+        }
+        request_body = Mock()
+        server = RobustSorobanServer(server_url="some url", client=client_mock)
+
+        with self.assertRaises(RequestException):
+            server._post(request_body=request_body, response_body_type=str)
+
+    def test_RobustSorobanServer__post_json_err(self):
+        client_mock = Mock()
+        client_mock.post.return_value = Response(
+            headers={
+                "Connection": "keep-alive",
+                "Content-Length": "13",
+                "Content-Type": "text/plain; charset=utf-8",
+                "Server": "awselb/2.0",
+            },
+            status_code=404,
+            text="404 Not Found",
+            url="some url",
+        )
+        request_body = Mock()
+        server = RobustSorobanServer(server_url="some url", client=client_mock)
+
+        with self.assertRaisesMessage(RequestException, "404 Not Found"):
+            server._post(request_body=request_body, response_body_type=str)
 
     @patch("core.soroban.SorobanServer.close")
     def test___exit__(self, close_mock):
@@ -264,12 +365,12 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.called_once_with(1)
 
     @patch("core.soroban.SorobanService.sleep")
-    @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     def test_clear_db_and_cache(self, logger_mock, sleep_mock):
         models.Contract.objects.create(id="c1")
         models.Account.objects.create(address="acc1")
         models.Dao.objects.create(id="dao1", contract_id="c1", name="dao1 name", owner_id="acc1")
-        models.Asset.objects.create(id="a1", owner_id="acc1", dao_id="dao1", total_supply=100)
+        models.Asset.objects.create(id="a1", address="a1", owner_id="acc1", dao_id="dao1", total_supply=100)
         models.AssetHolding.objects.create(asset_id="a1", owner_id="acc1", balance=100)
         models.Proposal.objects.create(
             id="prop1",
@@ -283,7 +384,7 @@ class SorobanTest(IntegrationTestCase):
             dao_id="dao1",
             proposal_duration=1,
             proposal_token_deposit=2,
-            minimum_majority=3,
+            min_threshold_configuration=3,
             type=models.GovernanceType.MAJORITY_VOTE,
         )
         models.Vote.objects.create(voter_id="acc1", proposal_id="prop1", in_favor=True, voting_power=10)
@@ -297,7 +398,9 @@ class SorobanTest(IntegrationTestCase):
             soroban_service.clear_db_and_cache(start_time=1)
 
         sleep_mock.assert_called_once_with(start_time=1)
-        logger_mock.info.assert_called_once_with("DB and chain are out of sync! Recreating DB...")
+        logger_mock.info.assert_called_once_with(
+            "Service and chain are out of sync! Recreating DB, clearing cache, restarting listener..."
+        )
         self.assertIsNone(cache.get(key="some_key"))
         self.assertTrue(cache.get(key="restart_listener"))
         for model in (
@@ -313,6 +416,131 @@ class SorobanTest(IntegrationTestCase):
             models.Governance,
         ):
             self.assertListEqual(list(model.objects.all()), [])
+
+    @patch("core.soroban.slack_logger")
+    def test_clear_db_and_cache_new_config(self, slack_logger):
+        soroban_service.set_config(
+            data={
+                "core_contract_address": "a",
+                "votes_contract_address": "b",
+                "assets_wasm_hash": "c",
+                "blockchain_url": "d",
+                "network_passphrase": "e",
+            }
+        )
+
+        with self.assertNumQueries(1):
+            soroban_service.clear_db_and_cache(
+                start_time=1,
+                new_config={
+                    "core_contract_address": "1",
+                    "votes_contract_address": "2",
+                },
+            )
+        self.assertEqual(
+            soroban_service.set_config(),
+            {
+                "core_contract_address": "1",
+                "votes_contract_address": "2",
+                "assets_wasm_hash": "some_wasm_hash",
+                "blockchain_url": "https://rpc-futurenet.stellar.org",
+                "network_passphrase": "Test SDF Future Network ; October 2022",
+            },
+        )
+        slack_logger.info.assert_called_once_with(
+            "Service and chain are out of sync! Recreating DB, clearing cache, restarting listener..."
+        )
+
+    @data(
+        # input_data, current_cache, expected_res
+        # no input, no cache
+        (
+            None,
+            None,
+            {
+                "core_contract_address": "a",
+                "votes_contract_address": "b",
+                "assets_wasm_hash": "c",
+                "blockchain_url": "d",
+                "network_passphrase": "e",
+            },
+        ),
+        # no input, existing cache
+        (
+            None,
+            {
+                "core_contract_address": 1,
+                "votes_contract_address": 2,
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+            },
+            {
+                "core_contract_address": 1,
+                "votes_contract_address": 2,
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+                "network_passphrase": "e",
+            },
+        ),
+        # input overwrites cache
+        (
+            {
+                "core_contract_address": "a1",
+                "votes_contract_address": "a2",
+            },
+            {
+                "core_contract_address": 1,
+                "votes_contract_address": 2,
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+            },
+            {
+                "core_contract_address": "a1",
+                "votes_contract_address": "a2",
+                "assets_wasm_hash": 3,
+                "blockchain_url": 4,
+                "network_passphrase": "e",
+            },
+        ),
+    )
+    def test_set_config(self, case):
+        input_data, current_cache, expected_res = case
+
+        if current_cache:
+            cache.set("soroban_config", current_cache)
+
+        with override_settings(
+            CORE_CONTRACT_ADDRESS="a",
+            VOTES_CONTRACT_ADDRESS="b",
+            ASSETS_WASM_HASH="c",
+            BLOCKCHAIN_URL="d",
+            NETWORK_PASSPHRASE="e",
+        ):
+            res = soroban_service.set_config(data=input_data)
+
+        self.assertEqual(res, expected_res)
+        self.assertEqual(cache.get("soroban_config"), expected_res)
+
+    def test_set_trusted_contract_ids(self):
+        models.Account.objects.create(address="acc1")
+        models.Account.objects.create(address="acc2")
+        models.Contract.objects.create(id="c1")
+        models.Contract.objects.create(id="c2")
+        models.Dao.objects.create(id="d1", contract_id="c1", owner_id="acc1")
+        models.Dao.objects.create(id="d2", contract_id="c2", owner_id="acc2")
+        models.Asset.objects.create(id="a1", address="a1", dao_id="d1", owner_id="acc1", total_supply=0)
+        models.Asset.objects.create(id="a2", address="a2", dao_id="d2", owner_id="acc2", total_supply=0)
+        expected_ids = [
+            b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+            b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+            "a1",
+            "a2",
+        ]
+
+        ids = soroban_service.set_trusted_contract_ids()
+
+        self.assertEqual(ids, expected_ids)
+        self.assertEqual(cache.get("trusted_contract_ids"), expected_ids)
 
     @data(
         # start, end, guess
@@ -351,33 +579,12 @@ class SorobanTest(IntegrationTestCase):
         with self.assertRaisesMessage(RequestException, "roar"):
             soroban_service.find_start_ledger()
 
-    def test_set_trusted_contract_ids(self):
-        models.Account.objects.create(address="acc1")
-        models.Account.objects.create(address="acc2")
-        models.Contract.objects.create(id="c1")
-        models.Contract.objects.create(id="c2")
-        models.Dao.objects.create(id="d1", contract_id="c1", owner_id="acc1")
-        models.Dao.objects.create(id="d2", contract_id="c2", owner_id="acc2")
-        models.Asset.objects.create(id="a1", dao_id="d1", owner_id="acc1", total_supply=0)
-        models.Asset.objects.create(id="a2", dao_id="d2", owner_id="acc2", total_supply=0)
-        expected_ids = [
-            b"6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-            b"15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
-            "a1",
-            "a2",
-        ]
-
-        ids = soroban_service.set_trusted_contract_ids()
-
-        self.assertEqual(ids, expected_ids)
-        self.assertEqual(cache.get("trusted_contract_ids"), expected_ids)
-
     def test_get_events_filters(self):
         cache.set(
             "trusted_contract_ids",
             [
-                b"6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                b"15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                 "a1",
                 "a2",
                 "a3",
@@ -388,8 +595,8 @@ class SorobanTest(IntegrationTestCase):
         expected_filters = [
             EventFilter(
                 contractIds=[
-                    b"6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                    b"15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                    b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                    b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                     "a1",
                     "a2",
                     "a3",
@@ -416,8 +623,8 @@ class SorobanTest(IntegrationTestCase):
             filters=[
                 EventFilter(
                     contractIds=[
-                        "6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                        "15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                        "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                        "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                     ],
                 )
             ],
@@ -543,8 +750,8 @@ class SorobanTest(IntegrationTestCase):
             filters=[
                 EventFilter(
                     contractIds=[
-                        "6cd05d7bafbade182ba351316e808b0d7d50c6e0a4146f0e819a05d71ba4a7d7",
-                        "15f4fc7baf1194e5439ba89286b4ad064f9728016f1531d9f576512ba7e60723",
+                        "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
+                        "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
                     ],
                 )
             ],
@@ -622,24 +829,73 @@ class SorobanTest(IntegrationTestCase):
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.soroban.SorobanService.find_start_ledger")
     @patch("core.soroban.SorobanService.fetch_event_data")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
     @patch("core.soroban.time.sleep")
     @patch("core.soroban.time.time")
-    def test_listen_integrity_err(
-        self, time_mock, sleep_mock, logger_mock, fetch_event_data_mock, find_start_ledger_mock, clear_db_and_cache_mock
+    def test_listen_IntegrityError(
+        self,
+        time_mock,
+        sleep_mock,
+        logger_mock,
+        slack_logger_mock,
+        fetch_event_data_mock,
+        find_start_ledger_mock,
+        clear_db_and_cache_mock,
     ):
         time_mock.return_value = 10
         sleep_mock.side_effect = BreakRetry
         fetch_event_data_mock.side_effect = IntegrityError
         models.Block.objects.create(number=0, executed=True)
+        expected_config = {
+            "core_contract_address": "a",
+            "votes_contract_address": "b",
+            "assets_wasm_hash": "some_wasm_hash",
+            "blockchain_url": "https://rpc-futurenet.stellar.org",
+            "network_passphrase": "Test SDF Future Network ; October 2022",
+        }
+        soroban_service.set_config(
+            data={
+                "core_contract_address": "a",
+                "votes_contract_address": "b",
+            }
+        )
 
         with self.assertRaises(BreakRetry):
             soroban_service.listen()
 
         logger_mock.info.assert_called_once_with("Listening... Latest block number: 1")
         find_start_ledger_mock.assert_called_once_with()
-        clear_db_and_cache_mock.assert_called_once_with(start_time=10)
+        slack_logger_mock.exception.assert_called_once_with("IntegrityError")
+        clear_db_and_cache_mock.assert_called_once_with(start_time=10, new_config=expected_config)
         fetch_event_data_mock.assert_called_once_with(start_ledger=1)
+        self.assertEqual(soroban_service.set_config(), expected_config)
+
+    @patch("core.soroban.SorobanService.fetch_event_data")
+    @patch("core.soroban.slack_logger")
+    @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    @patch("core.soroban.time.time")
+    def test_listen_OutOfSyncException(
+        self,
+        time_mock,
+        sleep_mock,
+        logger_mock,
+        slack_logger_mock,
+        fetch_event_data_mock,
+    ):
+        time_mock.return_value = 10
+        sleep_mock.side_effect = BreakRetry
+        fetch_event_data_mock.side_effect = OutOfSyncException
+        models.Block.objects.create(number=0, executed=True)
+
+        with self.assertRaises(BreakRetry):
+            soroban_service.listen()
+
+        logger_mock.info.assert_called_once_with("Listening... Latest block number: 1")
+        slack_logger_mock.exception.assert_called_once_with("OutOfSyncException")
+        fetch_event_data_mock.assert_called_once_with(start_ledger=1)
+        self.assertTrue(cache.get(key="restart_listener"))
 
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.soroban.SorobanService.find_start_ledger")
@@ -700,12 +956,14 @@ class SorobanTest(IntegrationTestCase):
     @patch("core.soroban.SorobanService.find_start_ledger")
     @patch("core.soroban.SorobanService.fetch_event_data")
     @patch("core.soroban.logger")
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.SorobanService.sleep")
     @patch("core.soroban.time.time")
     def test_listen_restarting(
         self,
         time_mock,
         sleep_mock,
+        slack_logger_mock,
         logger_mock,
         fetch_event_data_mock,
         find_start_ledger_mock,
@@ -732,6 +990,9 @@ class SorobanTest(IntegrationTestCase):
                 call("Listening... Latest block number: 4"),
                 call("Listening... Latest block number: 51"),
             ]
+        )
+        slack_logger_mock.info.assert_called_once_with(
+            "Service and chain are out of sync! Recreating DB, clearing cache, restarting listener..."
         )
         find_start_ledger_mock.assert_called_once_with()
         fetch_event_data_mock.assert_has_calls(

@@ -5,16 +5,15 @@ from functools import partial, reduce
 from itertools import chain
 from typing import DefaultDict
 
-from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Q
-from django.utils import timezone
 from stellar_sdk import StrKey
 
 from core import models, tasks
 
 logger = logging.getLogger("alerts")
+slack_logger = logging.getLogger("alerts.slack")
 
 
 class ParseBlockException(Exception):
@@ -134,6 +133,7 @@ class SorobanEventHandler:
             assets.append(
                 models.Asset(
                     id=binascii.hexlify(StrKey.decode_contract(asset_id)).decode(),
+                    address=asset_id,
                     dao_id=dao_id,
                     owner_id=owner_id,
                     total_supply=0,
@@ -178,7 +178,7 @@ class SorobanEventHandler:
         rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
         """
         asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
-        asset_ids_to_owner_ids = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
+        asset_ids_to_owner_ids: DefaultDict = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
         asset_id: str
         accs = set()
         # contract_id becomes asset_id
@@ -190,6 +190,9 @@ class SorobanEventHandler:
                 asset_ids_to_owner_ids[asset_id].add(to_acc)
                 accs.add(models.Account(address=to_acc))
         if asset_holding_data:
+            models.Dao.objects.filter(asset__in=asset_ids_to_owner_ids.keys(), setup_complete=False).update(
+                setup_complete=True
+            )
             models.Account.objects.bulk_create(accs, ignore_conflicts=True)
             existing_holdings = collections.defaultdict(dict)
             for asset_holding in models.AssetHolding.objects.filter(
@@ -245,9 +248,11 @@ class SorobanEventHandler:
                 models.Governance(
                     dao_id=values["dao_id"],
                     proposal_duration=values["proposal_duration"],
-                    proposal_token_deposit=values["proposal_token_deposit"],
-                    minimum_majority=0,  # noqa: E501 todo waiting for https://github.com/deep-ink-ventures/elio-dao-protocol/issues/45
-                    type={"MAJORITY": models.GovernanceType.MAJORITY_VOTE}.get(values["proposal_voting_type"][0]),
+                    proposal_token_deposit=values.get("proposal_token_deposit"),
+                    min_threshold_configuration=values["min_threshold_configuration"],
+                    type={"MAJORITY": models.GovernanceType.MAJORITY_VOTE}.get(
+                        (proposal_voting_type := values.get("proposal_voting_type")) and proposal_voting_type[0]
+                    ),
                 )
             )
 
@@ -264,44 +269,44 @@ class SorobanEventHandler:
 
         create Proposals based on event data
         """
-        proposals = []
+        acc_ids = set()
         dao_ids = set()
-
+        proposals = []
         for values in chain(*event_data.values()):
-            dao_id = values["dao_id"]
-            dao_ids.add(dao_id)
+            acc_ids.add(values["owner_id"])
+            dao_ids.add(values["dao_id"])
             proposals.append(
                 models.Proposal(
-                    id=str(values["proposal_id"][0]),
-                    dao_id=dao_id,
+                    id=str(values["proposal_id"]),
+                    dao_id=values["dao_id"],
                     creator_id=values["owner_id"],
                     birth_block_number=block.number,
                 )
             )
         if proposals:
+            # gracefully create potentially missing accounts and corresponding asset holdings for each proposal
+            models.Account.objects.bulk_create(
+                [models.Account(address=acc_id) for acc_id in acc_ids], ignore_conflicts=True
+            )
+            dao_id_to_asset_id = {
+                vals["dao_id"]: vals["id"]
+                for vals in models.Asset.objects.filter(dao_id__in=dao_ids).values("id", "dao_id")
+            }
+            models.AssetHolding.objects.bulk_create(
+                [
+                    models.AssetHolding(
+                        owner_id=proposal.creator_id, asset_id=dao_id_to_asset_id[proposal.dao_id], balance=0
+                    )
+                    for proposal in proposals
+                ],
+                ignore_conflicts=True,
+            )
+
             dao_id_to_holding_data: DefaultDict = collections.defaultdict(list)
             for dao_id, owner_id, balance in models.AssetHolding.objects.filter(asset__dao__id__in=dao_ids).values_list(
                 "asset__dao_id", "owner_id", "balance"
             ):
                 dao_id_to_holding_data[dao_id].append((owner_id, balance))
-
-            # TODO
-            # dao_id_to_proposal_duration = {
-            #     dao_id: proposal_duration
-            #     for dao_id, proposal_duration in models.Governance.objects.filter(dao_id__in=dao_ids).values_list(
-            #         "dao_id", "proposal_duration"
-            #     )
-            # }
-
-            # set end dates for proposals
-            # current time + proposal duration in block * block creation interval
-            proposal_duration = 10_000
-            # finalization_duration = 5_000
-            # proposal_max_nr = 25
-            for proposal in proposals:
-                proposal.ends_at = timezone.now() + timezone.timedelta(
-                    seconds=proposal_duration * settings.BLOCK_CREATION_INTERVAL
-                )
 
             models.Proposal.objects.bulk_create(proposals)
             # for all proposals: create a Vote placeholder for each Account holding tokens (AssetHoldings) of the
@@ -323,11 +328,12 @@ class SorobanEventHandler:
         set Proposals' metadata based on event data
         """
         if proposal_data := {
-            str(values["proposal_id"][0]): (values["url"], values["hash"]) for values in chain(*event_data.values())
+            str(values["proposal_id"]): (values["url"], values["hash"]) for values in chain(*event_data.values())
         }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=proposal_data.keys())):
                 proposal.metadata_url, proposal.metadata_hash = proposal_data[proposal.id]
-            models.Proposal.objects.bulk_update(proposals, fields=["metadata_hash", "metadata_url"])
+                proposal.setup_complete = True
+            models.Proposal.objects.bulk_update(proposals, fields=["metadata_hash", "metadata_url", "setup_complete"])
             tasks.update_proposal_metadata.delay(proposal_ids=list(proposal_data.keys()))
 
     @staticmethod
@@ -340,7 +346,7 @@ class SorobanEventHandler:
         """
         proposal_ids_to_voting_data = collections.defaultdict(dict)  # {proposal_id: {voter_id: in_favor}}
         for values in chain(*event_data.values()):
-            proposal_ids_to_voting_data[str(values["proposal_id"][0])][values["voter_id"]] = values["in_favor"]
+            proposal_ids_to_voting_data[str(values["proposal_id"])][values["voter_id"]] = values["in_favor"]
         if proposal_ids_to_voting_data:
             for vote in (
                 votes_to_update := models.Vote.objects.filter(
@@ -371,7 +377,7 @@ class SorobanEventHandler:
         """
         proposal_id_to_status = {}
         for values in chain(*event_data.values()):
-            proposal_id_to_status[str(values["proposal_id"][0])] = {
+            proposal_id_to_status[str(values["proposal_id"])] = {
                 "Accepted": models.ProposalStatus.PENDING,
                 "Rejected": models.ProposalStatus.REJECTED,
                 "Implemented": models.ProposalStatus.IMPLEMENTED,
@@ -390,7 +396,7 @@ class SorobanEventHandler:
         faults Proposals' based on event data
         """
         if faulted_proposals := {
-            str(values["proposal_id"][0]): values["reason"] for values in chain(*event_data.values())
+            str(values["proposal_id"]): values["reason"] for values in chain(*event_data.values())
         }:
             for proposal in (proposals := models.Proposal.objects.filter(id__in=faulted_proposals.keys())):
                 proposal.fault = faulted_proposals[proposal.id]
@@ -420,22 +426,23 @@ class SorobanEventHandler:
                 topics = topics[0], topics[1]
                 action = self.topics_to_action[topics]
             except Exception:  # noqa E722
-                logger.error(f"NotImplementedError{error_base} No action defined for topics: {topics}.")
+                if not topics[0] in ("fn_call", "fn_return"):
+                    logger.error(f"NotImplementedError{error_base} No action defined for topics: {topics}.")
             else:
                 try:
                     action(event_data=events_by_contract_id, block=block)
                 except IntegrityError:
                     msg = "IntegrityError" + error_base
-                    logger.exception(msg)
+                    slack_logger.exception(msg)
                     raise ParseBlockException(msg)
                 except Exception:  # noqa E722
                     msg = "Unexpected error" + error_base
-                    logger.exception(msg)
+                    slack_logger.exception(msg)
                     raise ParseBlockException(msg)
 
         block.executed = True
         block.save(update_fields=["executed"])
-        cache.set(key="current_block", value=block.number)
+        cache.set(key="current_block_number", value=block.number)
 
 
 soroban_event_handler = SorobanEventHandler()

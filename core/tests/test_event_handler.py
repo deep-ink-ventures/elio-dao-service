@@ -153,12 +153,14 @@ class EventHandlerTest(IntegrationTestCase):
         expected_assets = [
             models.Asset(
                 id="1bc539fc7adb3cc7e6e524e2851ee98d648aa20cff35a1dc261556bc76077bc4",
+                address="CAN4KOP4PLNTZR7G4USOFBI65GGWJCVCBT7TLIO4EYKVNPDWA554IOV5",
                 total_supply=0,
                 owner_id="acc1",
                 dao_id="dao1",
             ),
             models.Asset(
                 id="7bfbd989bb57991c2b5b34b3869c1b69407b8a74e81bb11d9e07a5b2f24fcab8",
+                address="CB57XWMJXNLZSHBLLM2LHBU4DNUUA64KOTUBXMI5TYD2LMXSJ7FLRIXD",
                 total_supply=0,
                 owner_id="acc2",
                 dao_id="dao2",
@@ -245,10 +247,6 @@ class EventHandlerTest(IntegrationTestCase):
             "2": [{"amount": 20, "owner_id": "acc2", "new_owner_id": "acc1", "not": "interesting"}],
             "3": [{"amount": 50, "owner_id": "acc3", "new_owner_id": "acc2", "not": "interesting"}],
         }
-
-        with self.assertNumQueries(4):
-            soroban_event_handler._transfer_assets(event_data=event_data)
-
         expected_asset_holdings = [
             models.AssetHolding(asset_id="1", owner_id="acc1", balance=75),  # 100 - 10 - 15
             models.AssetHolding(asset_id="1", owner_id="acc2", balance=50),  # 0 + 10 + 15 + 25
@@ -260,11 +258,36 @@ class EventHandlerTest(IntegrationTestCase):
             models.AssetHolding(asset_id="3", owner_id="acc3", balance=250),  # 300 - 50
             models.AssetHolding(asset_id="4", owner_id="acc3", balance=400),  # 300
         ]
+        expected_daos = [
+            models.Dao(
+                id="dao1",
+                contract_id="contract1",
+                name="dao1 name",
+                owner_id="acc1",
+                creator_id="acc1",
+                setup_complete=True,
+            ),
+            models.Dao(
+                id="dao2",
+                contract_id="contract2",
+                name="dao2 name",
+                owner_id="acc2",
+                creator_id="acc2",
+                setup_complete=True,
+            ),
+            models.Dao(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3", setup_complete=True),
+            models.Dao(id="dao4", contract_id="contract4", name="dao4 name", owner_id="acc3", setup_complete=False),
+        ]
+
+        with self.assertNumQueries(5):
+            soroban_event_handler._transfer_assets(event_data=event_data)
+
         self.assertModelsEqual(
             models.AssetHolding.objects.order_by("asset_id", "owner_id"),
             expected_asset_holdings,
             ignore_fields=("id", "created_at", "updated_at"),
         )
+        self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     @patch("core.file_handling.file_handler.urlopen")
     def test__set_dao_metadata(self, urlopen_mock):
@@ -322,7 +345,7 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     @patch("core.file_handling.file_handler.urlopen")
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     def test__set_dao_metadata_hash_mismatch(self, logger_mock, urlopen_mock):
         models.Account.objects.create(address="acc3")
         models.Dao.objects.create(
@@ -369,7 +392,7 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     @patch("core.file_handling.file_handler.FileHandler.download_metadata")
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     def test__set_dao_metadata_exception(self, logger_mock, download_metadata_mock):
         models.Account.objects.create(address="acc3")
         models.Dao.objects.create(
@@ -489,14 +512,14 @@ class EventHandlerTest(IntegrationTestCase):
                 {
                     "dao_id": "dao1",
                     "proposal_duration": 1,
-                    "proposal_token_deposit": 2,
-                    "proposal_voting_type": ["MAJORITY"],
+                    "min_threshold_configuration": 2,
                 },
                 {
                     "dao_id": "dao2",
                     "proposal_duration": 4,
                     "proposal_token_deposit": 5,
                     "proposal_voting_type": ["MAJORITY"],
+                    "min_threshold_configuration": 6,
                 },
             ]
         }
@@ -504,16 +527,16 @@ class EventHandlerTest(IntegrationTestCase):
             models.Governance(
                 dao_id="dao1",
                 proposal_duration=1,
-                proposal_token_deposit=2,
-                minimum_majority=0,
-                type=models.GovernanceType.MAJORITY_VOTE,
+                proposal_token_deposit=None,
+                type=None,
+                min_threshold_configuration=2,
             ),
             models.Governance(
                 dao_id="dao2",
                 proposal_duration=4,
                 proposal_token_deposit=5,
-                minimum_majority=0,
                 type=models.GovernanceType.MAJORITY_VOTE,
+                min_threshold_configuration=6,
             ),
         ]
 
@@ -546,45 +569,56 @@ class EventHandlerTest(IntegrationTestCase):
         self.assertModelsEqual(models.Dao.objects.order_by("id"), expected_daos)
 
     def test__create_proposals(self):
-        models.Account.objects.create(address="acc3")
+        acc3 = models.Account.objects.create(address="acc3")
         models.Dao.objects.create(id="dao3", contract_id="contract3", name="dao3 name", owner_id="acc3")
-        models.Asset.objects.create(id=1, dao_id="dao1", owner_id="acc1", total_supply=100)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=50)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=30)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=20)
-        models.Asset.objects.create(id=2, dao_id="dao2", owner_id="acc2", total_supply=100)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=50)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=30)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc1", balance=20)
-        models.Asset.objects.create(id=3, dao_id="dao3", owner_id="acc3", total_supply=100)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=50)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=30)
-        models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=20)
+        models.Asset.objects.create(id=1, dao_id="dao1", owner_id="acc1", total_supply=6)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=1)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=2)
+        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=3)
+        models.Asset.objects.create(id=2, dao_id="dao2", owner_id="acc2", total_supply=15)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc1", balance=4)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=5)
+        models.AssetHolding.objects.create(asset_id=2, owner_id="acc3", balance=6)
+        models.Asset.objects.create(id=3, dao_id="dao3", owner_id="acc3", total_supply=26)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc1", balance=7)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc2", balance=8)
+        models.AssetHolding.objects.create(asset_id=3, owner_id="acc3", balance=9)
         event_data = {
-            "1": [{"proposal_id": ["prop1"], "dao_id": "dao1", "owner_id": "acc1"}],
-            "2": [{"proposal_id": ["prop2"], "dao_id": "dao2", "owner_id": "acc2"}],
+            "1": [{"proposal_id": "prop1", "dao_id": "dao1", "owner_id": "acc1"}],
+            "2": [
+                {"proposal_id": "prop2", "dao_id": "dao2", "owner_id": "acc2"},
+                {"proposal_id": "prop3", "dao_id": "dao2", "owner_id": "acc4"},
+            ],
         }
         expected_proposals = [
             models.Proposal(id="prop1", dao_id="dao1", creator_id="acc1", birth_block_number=123),
             models.Proposal(id="prop2", dao_id="dao2", creator_id="acc2", birth_block_number=123),
+            models.Proposal(id="prop3", dao_id="dao2", creator_id="acc4", birth_block_number=123),
         ]
         expected_votes = [
-            models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=50, in_favor=None),
-            models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=30, in_favor=None),
-            models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=20, in_favor=None),
-            models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=50, in_favor=None),
-            models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=30, in_favor=None),
-            models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc1", voting_power=1, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc2", voting_power=2, in_favor=None),
+            models.Vote(proposal_id="prop1", voter_id="acc3", voting_power=3, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc1", voting_power=4, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc2", voting_power=5, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc3", voting_power=6, in_favor=None),
+            models.Vote(proposal_id="prop2", voter_id="acc4", voting_power=0, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc1", voting_power=4, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc2", voting_power=5, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc3", voting_power=6, in_favor=None),
+            models.Vote(proposal_id="prop3", voter_id="acc4", voting_power=0, in_favor=None),
         ]
+        expected_accs = [self.acc1, self.acc2, acc3, models.Account(address="acc4")]
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(7):
             soroban_event_handler._create_proposals(
                 event_data=event_data, block=models.Block.objects.create(number=123)
             )
 
+        self.assertModelsEqual(models.Account.objects.order_by("address"), expected_accs)
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
         self.assertModelsEqual(
-            models.Vote.objects.order_by("proposal_id", "-voting_power"),
+            models.Vote.objects.order_by("proposal_id", "voter_id"),
             expected_votes,
             ignore_fields=("created_at", "updated_at", "id"),
         )
@@ -603,10 +637,10 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
         event_data = {
             "1": [
-                {"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1},
+                {"proposal_id": "1", "url": "url1", "hash": metadata_hash_1},
             ],
             "2": [
-                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+                {"proposal_id": "2", "url": "url2", "hash": metadata_hash_2},
             ],
         }
         expected_proposals = [
@@ -617,6 +651,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_1,
                 metadata=metadata_1,
                 birth_block_number=10,
+                setup_complete=True,
             ),
             models.Proposal(
                 id="2",
@@ -625,6 +660,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_2,
                 metadata=metadata_2,
                 birth_block_number=10,
+                setup_complete=True,
             ),
         ]
         with self.assertNumQueries(4):
@@ -633,7 +669,7 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.assert_has_calls([call("url1"), call("url2")], any_order=True)
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     @patch("core.file_handling.file_handler.urlopen")
     def test__proposal_set_metadata_hash_mismatch(self, urlopen_mock, logger_mock):
         models.Account.objects.create(address="acc3")
@@ -650,10 +686,10 @@ class EventHandlerTest(IntegrationTestCase):
         urlopen_mock.side_effect = lambda url: {"url1": file_1, "url2": file_2}.get(url)
         event_data = {
             "1": [
-                {"proposal_id": ["1"], "url": "url1", "hash": "wrong hash"},
+                {"proposal_id": "1", "url": "url1", "hash": "wrong hash"},
             ],
             "2": [
-                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+                {"proposal_id": "2", "url": "url2", "hash": metadata_hash_2},
             ],
         }
         expected_proposals = [
@@ -664,6 +700,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash="wrong hash",
                 metadata=None,
                 birth_block_number=10,
+                setup_complete=True,
             ),
             models.Proposal(
                 id="2",
@@ -672,6 +709,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_2,
                 metadata=metadata_2,
                 birth_block_number=10,
+                setup_complete=True,
             ),
             models.Proposal(
                 id="3",
@@ -680,6 +718,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=None,
                 metadata=None,
                 birth_block_number=10,
+                setup_complete=False,
             ),
         ]
 
@@ -691,7 +730,7 @@ class EventHandlerTest(IntegrationTestCase):
 
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     @patch("core.file_handling.file_handler.FileHandler.download_metadata")
     def test__proposals_set_metadata_exception(self, download_metadata_mock, logger_mock):
         models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
@@ -710,8 +749,8 @@ class EventHandlerTest(IntegrationTestCase):
 
         download_metadata_mock.side_effect = download_metadata
         event_data = {
-            "1": [{"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1}],
-            "2": [{"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2}],
+            "1": [{"proposal_id": "1", "url": "url1", "hash": metadata_hash_1}],
+            "2": [{"proposal_id": "2", "url": "url2", "hash": metadata_hash_2}],
         }
 
         expected_proposals = [
@@ -722,6 +761,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_1,
                 metadata=None,
                 birth_block_number=10,
+                setup_complete=True,
             ),
             models.Proposal(
                 id="2",
@@ -730,6 +770,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_2,
                 metadata=metadata_2,
                 birth_block_number=10,
+                setup_complete=True,
             ),
         ]
 
@@ -748,7 +789,7 @@ class EventHandlerTest(IntegrationTestCase):
         )
         self.assertModelsEqual(models.Proposal.objects.order_by("id"), expected_proposals)
 
-    @patch("core.tasks.logger")
+    @patch("core.tasks.slack_logger")
     @patch("core.file_handling.file_handler.FileHandler.download_metadata")
     def test__create_proposals_everything_failed(self, download_metadata_mock, logger_mock):
         models.Proposal.objects.create(id="1", dao_id="dao1", birth_block_number=10)
@@ -763,10 +804,10 @@ class EventHandlerTest(IntegrationTestCase):
         download_metadata_mock.side_effect = Exception
         event_data = {
             "1": [
-                {"proposal_id": ["1"], "url": "url1", "hash": metadata_hash_1},
+                {"proposal_id": "1", "url": "url1", "hash": metadata_hash_1},
             ],
             "2": [
-                {"proposal_id": ["2"], "url": "url2", "hash": metadata_hash_2},
+                {"proposal_id": "2", "url": "url2", "hash": metadata_hash_2},
             ],
         }
         expected_proposals = [
@@ -777,6 +818,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_1,
                 metadata=None,
                 birth_block_number=10,
+                setup_complete=True,
             ),
             models.Proposal(
                 id="2",
@@ -785,6 +827,7 @@ class EventHandlerTest(IntegrationTestCase):
                 metadata_hash=metadata_hash_2,
                 metadata=None,
                 birth_block_number=10,
+                setup_complete=True,
             ),
         ]
 
@@ -816,11 +859,11 @@ class EventHandlerTest(IntegrationTestCase):
         models.Vote.objects.create(proposal_id="prop2", voter_id="acc1", voting_power=20, in_favor=None)
         event_data = {
             "c1": [
-                {"proposal_id": ["prop1"], "voter_id": "acc1", "in_favor": True, "not": "interesting"},
-                {"proposal_id": ["prop1"], "voter_id": "acc2", "in_favor": False, "not": "interesting"},
-                {"proposal_id": ["prop1"], "voter_id": "acc3", "in_favor": False, "not": "interesting"},
-                {"proposal_id": ["prop2"], "voter_id": "acc1", "in_favor": True, "not": "interesting"},
-                {"proposal_id": ["prop2"], "voter_id": "acc2", "in_favor": True, "not": "interesting"},
+                {"proposal_id": "prop1", "voter_id": "acc1", "in_favor": True, "not": "interesting"},
+                {"proposal_id": "prop1", "voter_id": "acc2", "in_favor": False, "not": "interesting"},
+                {"proposal_id": "prop1", "voter_id": "acc3", "in_favor": False, "not": "interesting"},
+                {"proposal_id": "prop2", "voter_id": "acc1", "in_favor": True, "not": "interesting"},
+                {"proposal_id": "prop2", "voter_id": "acc2", "in_favor": True, "not": "interesting"},
             ],
         }
         expected_votes = [
@@ -852,11 +895,11 @@ class EventHandlerTest(IntegrationTestCase):
         models.Proposal.objects.create(id="prop7", dao_id="dao2", birth_block_number=10)
         event_data = {
             "c1": [
-                {"proposal_id": ["prop1"], "status": ["Accepted"]},
-                {"proposal_id": ["prop3"], "status": ["Accepted"]},
-                {"proposal_id": ["prop4"], "status": ["Implemented"]},
-                {"proposal_id": ["prop2"], "status": ["Rejected"]},
-                {"proposal_id": ["prop5"], "status": ["Rejected"]},
+                {"proposal_id": "prop1", "status": ["Accepted"]},
+                {"proposal_id": "prop3", "status": ["Accepted"]},
+                {"proposal_id": "prop4", "status": ["Implemented"]},
+                {"proposal_id": "prop2", "status": ["Rejected"]},
+                {"proposal_id": "prop5", "status": ["Rejected"]},
             ],
         }
         expected_proposals = [
@@ -883,9 +926,9 @@ class EventHandlerTest(IntegrationTestCase):
         models.Proposal.objects.create(id="prop5", dao_id="dao2", birth_block_number=10)
         event_data = {
             "c1": [
-                {"proposal_id": ["prop1"], "reason": "reason 1", "not": "interesting"},
-                {"proposal_id": ["prop2"], "reason": "reason 2", "not": "interesting"},
-                {"proposal_id": ["prop3"], "reason": "reason 3", "not": "interesting"},
+                {"proposal_id": "prop1", "reason": "reason 1", "not": "interesting"},
+                {"proposal_id": "prop2", "reason": "reason 2", "not": "interesting"},
+                {"proposal_id": "prop3", "reason": "reason 3", "not": "interesting"},
             ]
         }
         expected_proposals = [
@@ -1008,11 +1051,12 @@ class EventHandlerTest(IntegrationTestCase):
             mock.assert_not_called()
         block.refresh_from_db()
         self.assertTrue(block.executed)
-        self.assertEqual(cache.get("current_block"), 0)
+        self.assertEqual(cache.get("current_block_number"), 0)
 
     @patch("core.event_handler.logger")
+    @patch("core.event_handler.slack_logger")
     @patch("core.event_handler.SorobanEventHandler._create_daos")
-    def test_execute_actions_db_error(self, action_mock, logger_mock):
+    def test_execute_actions_db_error(self, action_mock, slack_logger_mock, logger_mock):
         block = models.Block.objects.create(number=0, event_data=[["c1", "e1", ["DAO", "created"], {"d": 1}]])
         action_mock.side_effect = IntegrityError
 
@@ -1022,11 +1066,19 @@ class EventHandlerTest(IntegrationTestCase):
         block.refresh_from_db()
         self.assertFalse(block.executed)
         action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
-        logger_mock.exception.assert_called_once_with("IntegrityError during block execution. Block number: 0.")
+        self.assertExactCalls(
+            logger_mock.info,
+            [
+                call("Executing event_data... Block number: 0"),
+                call("Contract ID: c1 | Event ID: e1 | Topics: ['DAO', 'created'] | Values: {'d': 1}"),
+            ],
+        )
+        slack_logger_mock.exception.assert_called_once_with("IntegrityError during block execution. Block number: 0.")
 
     @patch("core.event_handler.logger")
+    @patch("core.event_handler.slack_logger")
     @patch("core.event_handler.SorobanEventHandler._delete_daos")
-    def test_execute_actions_unexpected_error(self, action_mock, logger_mock):
+    def test_execute_actions_unexpected_error(self, action_mock, slack_logger_mock, logger_mock):
         block = models.Block.objects.create(number=0, event_data=[["c1", "e1", ["DAO", "destroyed"], {"d": 1}]])
         action_mock.side_effect = Exception
 
@@ -1036,7 +1088,14 @@ class EventHandlerTest(IntegrationTestCase):
         block.refresh_from_db()
         self.assertFalse(block.executed)
         action_mock.assert_called_once_with(event_data={"c1": [{"d": 1}]}, block=block)
-        logger_mock.exception.assert_called_once_with("Unexpected error during block execution. Block number: 0.")
+        self.assertExactCalls(
+            logger_mock.info,
+            [
+                call("Executing event_data... Block number: 0"),
+                call("Contract ID: c1 | Event ID: e1 | Topics: ['DAO', 'destroyed'] | Values: {'d': 1}"),
+            ],
+        )
+        slack_logger_mock.exception.assert_called_once_with("Unexpected error during block execution. Block number: 0.")
 
     @patch("core.event_handler.logger")
     def test_execute_actions_not_implemented(self, logger_mock):
@@ -1051,3 +1110,20 @@ class EventHandlerTest(IntegrationTestCase):
             "NotImplementedError during block execution. Block number: 0. "
             "No action defined for topics: ('DAO', 'crangled')."
         )
+
+    @patch("core.event_handler.logger")
+    def test_execute_actions_not_implemented_fns(self, logger_mock):
+        block = models.Block.objects.create(
+            number=0,
+            event_data=[
+                ["c1", "e1", ["fn_call", "crangled"], {"d": 1}],
+                ["c1", "e1", ["fn_return", "crangled"], {"d": 1}],
+            ],
+        )
+
+        with self.assertNumQueries(3):
+            SorobanEventHandler().execute_actions(block)
+
+        block.refresh_from_db()
+        self.assertTrue(block.executed)
+        logger_mock.error.assert_not_called()

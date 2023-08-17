@@ -18,6 +18,8 @@ class UpdateConfigSerializer(Serializer):  # noqa
     core_contract_address = CharField(required=False)
     votes_contract_address = CharField(required=False)
     assets_wasm_hash = CharField(required=False)
+    blockchain_url = CharField(required=False)
+    network_passphrase = CharField(required=False)
 
 
 class ConfigSerializer(Serializer):  # noqa
@@ -31,6 +33,13 @@ class ConfigSerializer(Serializer):  # noqa
     core_contract_address = CharField()
     votes_contract_address = CharField()
     assets_wasm_hash = CharField()
+    blockchain_url = CharField()
+    network_passphrase = CharField()
+    current_block_number = IntegerField(allow_null=True, required=False)
+    horizon_server_standalone = CharField()
+    horizon_server_futurenet = CharField()
+    horizon_server_testnet = CharField()
+    horizon_server_mainnet = CharField()
 
 
 class BalanceSerializer(Serializer):  # noqa
@@ -57,12 +66,16 @@ class AccountSerializerList(ModelSerializer):
 class DaoSerializer(ModelSerializer):
     owner_id = CharField(required=True)
     asset_id = CharField(source="asset.id", required=False)
+    asset_address = CharField(source="asset.address", required=False)
     proposal_duration = IntegerField(source="governance.proposal_duration", help_text="Proposal duration in blocks.")
     proposal_token_deposit = IntegerField(
-        source="governance.proposal_token_deposit", help_text="Token deposit required to create a Poposal"
+        source="governance.proposal_token_deposit",
+        help_text="Token deposit required to create a Proposal",
+        required=False,
     )
-    minimum_majority_per_1024 = IntegerField(
-        source="governance.minimum_majority", help_text="ayes >= nays + token_supply / 1024 * minimum_majority_per_1024"
+    min_threshold_configuration = IntegerField(
+        source="governance.min_threshold_configuration",
+        help_text="ayes >= nays + token_supply / 1024 * min_threshold_configuration",
     )
 
     class Meta:
@@ -74,9 +87,10 @@ class DaoSerializer(ModelSerializer):
             "creator_id",
             "owner_id",
             "asset_id",
+            "asset_address",
             "proposal_duration",
             "proposal_token_deposit",
-            "minimum_majority_per_1024",
+            "min_threshold_configuration",
             "setup_complete",
             "metadata",
             "metadata_url",
@@ -131,24 +145,26 @@ class DaoMetadataResponseSerializer(Serializer):  # noqa
 
 
 class AssetSerializer(ModelSerializer):
-    id = IntegerField(min_value=0)
+    id = CharField(required=True)
+    address = CharField(required=True)
     dao_id = CharField(required=True)
     owner_id = CharField(required=True)
     total_supply = IntegerField(min_value=0)
 
     class Meta:
         model = models.Asset
-        fields = ("id", "dao_id", "owner_id", "total_supply")
+        fields = ("id", "address", "dao_id", "owner_id", "total_supply")
 
 
 class AssetHoldingSerializer(ModelSerializer):
-    asset_id = IntegerField(min_value=0)
+    asset_id = CharField(required=True)
+    asset_address = CharField(source="asset.address", required=True)
     owner_id = CharField(required=True)
     balance = IntegerField(min_value=0)
 
     class Meta:
         model = models.AssetHolding
-        fields = ("id", "asset_id", "owner_id", "balance")
+        fields = ("id", "asset_id", "asset_address", "owner_id", "balance")
 
 
 class VotesSerializer(Serializer):  # noqa
@@ -173,6 +189,7 @@ class VotesSerializer(Serializer):  # noqa
 
 class ProposalSerializer(ModelSerializer):
     votes = VotesSerializer()
+    birth_block_number = IntegerField(min_value=0)
 
     class Meta:
         model = models.Proposal
@@ -187,6 +204,7 @@ class ProposalSerializer(ModelSerializer):
             "metadata_url",
             "metadata_hash",
             "birth_block_number",
+            "setup_complete",
         )
 
 
@@ -196,7 +214,10 @@ class AddProposalMetadataSerializer(Serializer):  # noqa
     url = URLField()
 
     def validate(self, attrs: dict):
-        attrs["description"] = bleach.clean(attrs["description"])
+        allowed_tags = {*bleach.ALLOWED_TAGS, "p", "br", "u"}
+        allowed_attrs = bleach.ALLOWED_ATTRIBUTES
+        allowed_attrs["a"] += ["target", "rel"]
+        attrs["description"] = bleach.clean(attrs["description"], tags=allowed_tags, attributes=allowed_attrs)
         return attrs
 
 

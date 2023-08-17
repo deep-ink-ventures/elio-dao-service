@@ -1,3 +1,4 @@
+import logging
 import secrets
 from itertools import chain
 
@@ -31,6 +32,8 @@ from core.view_utils import (
     signed_by_token_holder,
     swagger_query_param,
 )
+
+slack_logger = logging.getLogger("alerts.slack")
 
 
 @swagger_auto_schema(
@@ -88,14 +91,19 @@ def stats(request, *args, **kwargs):
 )
 @api_view()
 def config(request, *args, **kwargs):
+    from core.soroban import soroban_service
+
     serializer = serializers.ConfigSerializer(
         data={
             "deposit_to_create_dao": settings.DEPOSIT_TO_CREATE_DAO,
             "deposit_to_create_proposal": settings.DEPOSIT_TO_CREATE_PROPOSAL,
             "block_creation_interval": settings.BLOCK_CREATION_INTERVAL,
-            "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
-            "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
-            "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "current_block_number": cache.get("current_block_number"),
+            "horizon_server_standalone": "https://node.elio-dao.org/",
+            "horizon_server_futurenet": "https://horizon-futurenet.stellar.org/",
+            "horizon_server_testnet": "https://horizon-testnet.stellar.org/",
+            "horizon_server_mainnet": "https://horizon.stellar.org/",
+            **soroban_service.set_config(),
         }
     )
     serializer.is_valid(raise_exception=True)
@@ -116,21 +124,12 @@ def update_config(request, *args, **kwargs):
     if not (secret := settings.CONFIG_SECRET) or request.headers.get("Config-Secret") != secret:
         return Response(status=HTTP_401_UNAUTHORIZED)
 
-    data = {
-        "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
-        "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
-        "assets_wasm_hash": settings.ASSETS_WASM_HASH,
-        **request.data,
-    }
-    serializer = serializers.UpdateConfigSerializer(data=data)
+    serializer = serializers.UpdateConfigSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-
-    settings.CORE_CONTRACT_ADDRESS = data["core_contract_address"]
-    settings.VOTES_CONTRACT_ADDRESS = data["votes_contract_address"]
-    settings.ASSETS_WASM_HASH = data["assets_wasm_hash"]
-    cache.set(key="restart_listener", value=True)
-    soroban_service.clear_db_and_cache()
-    soroban_service.set_trusted_contract_ids()
+    soroban_service.clear_db_and_cache(new_config=serializer.data)
+    slack_logger.info(
+        "New deployment! :happy_sheep:", extra={"channel": settings.SLACK_ELIO_URL, "disable_formatting": True}
+    )
     return Response(data=serializer.data, status=HTTP_200_OK)
 
 
@@ -318,10 +317,6 @@ class ProposalViewSet(ReadOnlyModelViewSet, SearchableMixin):
         metadata = file_handler.upload_metadata(
             metadata=serializer.validated_data, storage_destination=f"{proposal.dao_id}/proposals/{proposal.id}"
         )
-        proposal.metadata = metadata["metadata"]
-        proposal.metadata_url = metadata["metadata_url"]
-        proposal.metadata_hash = metadata["metadata_hash"]
-        proposal.save(update_fields=["metadata", "metadata_url", "metadata_hash"])
         return Response(metadata, status=HTTP_201_CREATED)
 
     @swagger_auto_schema(

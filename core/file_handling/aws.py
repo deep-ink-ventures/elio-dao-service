@@ -7,7 +7,7 @@ from celery import shared_task
 
 from settings import settings
 
-logger = logging.getLogger("alerts")
+slack_logger = logging.getLogger("alerts.slack")
 
 
 class S3Client:
@@ -29,7 +29,7 @@ class S3Client:
         try:
             s3_client.client.upload_fileobj(**kwargs)
         except ClientError:
-            logger.exception(f"Error while uploading a file to s3. {kwargs}")
+            slack_logger.exception(f"Error while uploading a file to s3. {kwargs}")
 
     def upload_file(self, file, storage_destination) -> Optional[str]:
         """
@@ -57,7 +57,7 @@ class S3Client:
         try:
             self.resource.Bucket(self.bucket_name).objects.filter(Prefix=storage_destination).delete()
         except ClientError:
-            logger.exception("Error while deleting a file from s3.")
+            slack_logger.exception("Error while deleting a file from s3.")
 
 
 s3_client = S3Client()

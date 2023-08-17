@@ -3,8 +3,9 @@ import binascii
 import time
 from collections import defaultdict
 from functools import wraps
+from json import JSONDecodeError
 from logging import getLogger
-from typing import DefaultDict, Optional
+from typing import DefaultDict, Optional, Type
 
 from django.conf import settings
 from django.core.cache import cache
@@ -12,6 +13,8 @@ from django.db import IntegrityError, connection
 from stellar_sdk import Keypair, StrKey
 from stellar_sdk.soroban import SorobanServer
 from stellar_sdk.soroban.exceptions import RequestException
+from stellar_sdk.soroban.jsonrpc import Request, Response
+from stellar_sdk.soroban.server import V  # noqa
 from stellar_sdk.soroban.soroban_rpc import EventFilter
 from stellar_sdk.xdr import SCAddressType, SCVal, SCValType
 
@@ -19,6 +22,7 @@ from core import models as core_models
 from core.event_handler import soroban_event_handler
 
 logger = getLogger("alerts")
+slack_logger = getLogger("alerts.slack")
 
 
 def unpack_scval(val: SCVal):
@@ -27,6 +31,8 @@ def unpack_scval(val: SCVal):
             return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
         case SCValType.SCV_VEC:
             return [unpack_scval(entry) for entry in val.vec.sc_vec]
+        case SCValType.SCV_VOID:
+            return
         case SCValType.SCV_BOOL:
             return val.b
         case SCValType.SCV_SYMBOL:
@@ -54,6 +60,7 @@ def unpack_scval(val: SCVal):
         case SCValType.SCV_I128:
             return val.i128.hi.int64 << 64 | val.i128.lo.uint64
         case _:
+            slack_logger.error(f"Unhandled SCValType: {str(val)}")
             return str(val)
 
 
@@ -75,13 +82,17 @@ def retry(description: str):
             max_delay = retry_delays[-1]
             retry_delays = iter(retry_delays)
 
-            def log_and_sleep(err_msg: str, log_exception=False):
+            def log_and_sleep(err_msg: str, log_exception=False, stop_at_max_retry=False, log_to_slack=True):
+                _logger = slack_logger if log_to_slack else logger
                 retry_delay = next(retry_delays, max_delay)
+                if stop_at_max_retry and retry_delay == max_delay:
+                    logger.error("Breaking retry.")
+                    raise OutOfSyncException
                 err_msg = f"{err_msg} while {description}. Retrying in {retry_delay}s ..."
                 if log_exception:
-                    logger.exception(err_msg)
+                    _logger.exception(err_msg)
                 else:
-                    logger.error(err_msg)
+                    _logger.error(err_msg)
                 time.sleep(retry_delay)
 
             while True:
@@ -90,11 +101,23 @@ def retry(description: str):
                 except RequestException as exc:
                     match exc.message:
                         case "start is after newest ledger":
-                            log_and_sleep("RequestException (ahead of chain)")
+                            log_and_sleep(
+                                "RequestException (ahead of chain)", stop_at_max_retry=True, log_to_slack=False
+                            )
                         case "start is before oldest ledger":
                             raise NoLongerAvailableException
+                        case "404 Not Found":
+                            log_and_sleep("RequestException (404)")
                         case _:
-                            log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
+                            match exc.code:
+                                case 502:
+                                    log_and_sleep("RequestException (502 Bad Gateway)", log_to_slack=False)
+                                case 503:
+                                    log_and_sleep(
+                                        "RequestException (503 Service Temporarily Unavailable)", log_to_slack=False
+                                    )
+                                case _:
+                                    log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
                     log_and_sleep("Unexpected error", log_exception=True)
 
@@ -119,14 +142,32 @@ class NoLongerAvailableException(SorobanException):
     msg = "The requested ledger is no longer available."
 
 
+class RobustSorobanServer(SorobanServer):
+    """
+    added JSONDecodeError handling
+    """
+
+    def _post(self, request_body: Request, response_body_type: Type[V]) -> V:
+        json_data = request_body.dict(by_alias=True)
+        data = self._client.post(
+            self.server_url,
+            json_data=json_data,
+        )
+        try:
+            response = Response[response_body_type, str].parse_obj(data.json())
+        except JSONDecodeError:
+            raise RequestException(code=data.status_code, message=data.text)
+        if response.error:
+            raise RequestException(code=response.error.code, message=response.error.message)
+        return response.result
+
+
 class SorobanService(object):
-    soroban = None
+    soroban: RobustSorobanServer = None
 
     @retry("initializing blockchain connection")
     def __init__(self):
-        self.soroban = SorobanServer(
-            server_url=settings.BLOCKCHAIN_URL,
-        )
+        self.soroban = RobustSorobanServer(server_url=self.set_config()["blockchain_url"])
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
@@ -167,15 +208,21 @@ class SorobanService(object):
         if elapsed_time < settings.BLOCK_CREATION_INTERVAL:
             time.sleep(settings.BLOCK_CREATION_INTERVAL - elapsed_time)
 
-    def clear_db_and_cache(self, start_time: float = None):
+    def clear_db_and_cache(self, start_time: float = None, new_config: dict = None):
         """
         Args:
             start_time: time since last block was fetched from chain
+            new_config: new config to set
 
-        empties db, fetches seed accounts, sleeps if start_time was given, returns start Block
+        empties db & clears cache.
+        sets flag to restart the listener.
+        sets new_config if given.
+        sleeps if start_time was given.
         """
-        logger.info("DB and chain are out of sync! Recreating DB...")
+        slack_logger.info("Service and chain are out of sync! Recreating DB, clearing cache, restarting listener...")
         cache.clear()
+        if new_config:
+            self.set_config(data=new_config)
         with connection.cursor() as cursor:
             cursor.execute(
                 """
@@ -187,6 +234,48 @@ class SorobanService(object):
         cache.set(key="restart_listener", value=True)
         if start_time:
             self.sleep(start_time=start_time)
+
+    @staticmethod
+    def set_config(data: dict = None) -> dict:
+        """
+        Args:
+            data: config data to set
+
+        Returns:
+            current config data
+
+        sets soroban config data cache
+        """
+        data = {
+            "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
+            "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
+            "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "blockchain_url": settings.BLOCKCHAIN_URL,
+            "network_passphrase": settings.NETWORK_PASSPHRASE,
+            **(cache.get("soroban_config") or {}),
+            **(data or {}),
+        }
+        cache.set(key="soroban_config", value=data)
+        return data
+
+    def set_trusted_contract_ids(self) -> [str]:
+        """
+        sets "trusted_contract_ids" to
+            cache["config"]["core_contract_address"],
+            cache["config"]["votes_contract_address"],
+            all Asset IDs
+
+        Returns:
+            list of trusted contract IDs
+        """
+        config = self.set_config()
+        trusted_contract_ids = [
+            binascii.hexlify(StrKey.decode_contract(config["core_contract_address"])),
+            binascii.hexlify(StrKey.decode_contract(config["votes_contract_address"])),
+            *core_models.Asset.objects.values_list("id", flat=True),
+        ]
+        cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
+        return trusted_contract_ids
 
     def find_start_ledger(self, lower_bound: int = 0):
         """
@@ -228,23 +317,6 @@ class SorobanService(object):
                     if check(idx - 1) == "<":
                         return idx
                     higher_bound = idx
-
-    @staticmethod
-    def set_trusted_contract_ids() -> [str]:
-        """
-        sets "trusted_contract_ids" to CORE_CONTRACT_ADDRESS, VOTES_CONTRACT_ADDRESS (provided via env)
-        + all Asset IDs
-
-        Returns:
-            list of trusted contract IDs
-        """
-        trusted_contract_ids = [
-            binascii.hexlify(StrKey.decode_contract(settings.CORE_CONTRACT_ADDRESS)),
-            binascii.hexlify(StrKey.decode_contract(settings.VOTES_CONTRACT_ADDRESS)),
-            *core_models.Asset.objects.values_list("id", flat=True),
-        ]
-        cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
-        return trusted_contract_ids
 
     def get_events_filters(self):
         """
@@ -304,7 +376,15 @@ class SorobanService(object):
 
     def listen(self):
         while True:
-            cache.delete("restart_listener")
+            # reinitializing connection to the chain
+            if cache.get("restart_listener"):
+                logger.info("Restarting listener...")
+                self.soroban.close()
+                self.soroban = retry("reinitializing blockchain connection")(RobustSorobanServer)(
+                    server_url=self.set_config()["blockchain_url"]
+                )
+                cache.delete("restart_listener")
+            # execute existing Blocks
             for block in core_models.Block.objects.filter(executed=False).order_by("number"):
                 soroban_event_handler.execute_actions(block=block)
             latest_block = core_models.Block.objects.order_by("-number").first()
@@ -315,8 +395,12 @@ class SorobanService(object):
                 try:
                     latest_block_number = self.fetch_event_data(start_ledger=latest_block_number)
                 except IntegrityError:
-                    self.clear_db_and_cache(start_time=start_time)
+                    slack_logger.exception("IntegrityError")
+                    self.clear_db_and_cache(start_time=start_time, new_config=self.set_config())
                     latest_block_number = self.find_start_ledger()
+                except OutOfSyncException:
+                    slack_logger.exception("OutOfSyncException")
+                    cache.set(key="restart_listener", value=True)
                 except NoLongerAvailableException:
                     latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
                 else:
