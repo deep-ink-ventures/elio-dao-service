@@ -756,7 +756,7 @@ class CoreViewSetTest(IntegrationTestCase):
             "metadata_url": "https://some_storage.some_region.com/dao1/proposals/PROP1/metadata.json",
         }
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(3):
             res = self.client.post(
                 reverse("core-proposal-add-metadata", kwargs={"pk": "PROP1"}),
                 post_data,
