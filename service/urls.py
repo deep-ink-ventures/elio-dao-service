@@ -38,6 +38,7 @@ schema_view = get_schema_view(
 # noinspection PyUnresolvedReferences
 urlpatterns = [
     path("admin/", admin.site.urls),
+    path("multiclique/", include("multiclique.urls")),
     path("", include(core_urls.urlpatterns)),
     re_path(r"^redoc/$", schema_view.with_ui("redoc", cache_timeout=0), name="schema-redoc"),
 ]

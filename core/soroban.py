@@ -10,12 +10,10 @@ from typing import DefaultDict, Optional, Type
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
-from stellar_sdk import Keypair, StrKey
-from stellar_sdk.soroban import SorobanServer
-from stellar_sdk.soroban.exceptions import RequestException
-from stellar_sdk.soroban.jsonrpc import Request, Response
-from stellar_sdk.soroban.server import V  # noqa
-from stellar_sdk.soroban.soroban_rpc import EventFilter
+from stellar_sdk import Keypair, SorobanServer, StrKey
+from stellar_sdk.exceptions import SorobanRpcErrorResponse
+from stellar_sdk.soroban_rpc import EventFilter, Request, Response
+from stellar_sdk.soroban_server import V  # noqa
 from stellar_sdk.xdr import SCAddressType, SCVal, SCValType
 
 from core import models as core_models
@@ -98,26 +96,27 @@ def retry(description: str):
             while True:
                 try:
                     return f(*args, **kwargs)
-                except RequestException as exc:
+                except SorobanRpcErrorResponse as exc:
                     match exc.message:
                         case "start is after newest ledger":
                             log_and_sleep(
-                                "RequestException (ahead of chain)", stop_at_max_retry=True, log_to_slack=False
+                                "SorobanRpcErrorResponse (ahead of chain)", stop_at_max_retry=True, log_to_slack=False
                             )
                         case "start is before oldest ledger":
                             raise NoLongerAvailableException
                         case "404 Not Found":
-                            log_and_sleep("RequestException (404)")
+                            log_and_sleep("SorobanRpcErrorResponse (404)")
                         case _:
                             match exc.code:
                                 case 502:
-                                    log_and_sleep("RequestException (502 Bad Gateway)", log_to_slack=False)
+                                    log_and_sleep("SorobanRpcErrorResponse (502 Bad Gateway)", log_to_slack=False)
                                 case 503:
                                     log_and_sleep(
-                                        "RequestException (503 Service Temporarily Unavailable)", log_to_slack=False
+                                        "SorobanRpcErrorResponse (503 Service Temporarily Unavailable)",
+                                        log_to_slack=False,
                                     )
                                 case _:
-                                    log_and_sleep(f"RequestException ({exc.message})", log_exception=True)
+                                    log_and_sleep(f"SorobanRpcErrorResponse ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
                     log_and_sleep("Unexpected error", log_exception=True)
 
@@ -154,11 +153,11 @@ class RobustSorobanServer(SorobanServer):
             json_data=json_data,
         )
         try:
-            response = Response[response_body_type, str].parse_obj(data.json())
+            response = Response[response_body_type].parse_obj(data.json())
         except JSONDecodeError:
-            raise RequestException(code=data.status_code, message=data.text)
+            raise SorobanRpcErrorResponse(code=data.status_code, message=data.text)
         if response.error:
-            raise RequestException(code=response.error.code, message=response.error.message)
+            raise SorobanRpcErrorResponse(code=response.error.code, message=response.error.message)
         return response.result
 
 
@@ -291,7 +290,7 @@ class SorobanService(object):
         def check(start_ledger):
             try:
                 self.soroban.get_events(start_ledger=start_ledger)
-            except RequestException as exc:
+            except SorobanRpcErrorResponse as exc:
                 match exc.message:
                     case "start is before oldest ledger":
                         return "<"
