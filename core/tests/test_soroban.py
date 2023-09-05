@@ -8,8 +8,8 @@ from django.db import IntegrityError, connection
 from django.test import override_settings
 from stellar_sdk import Keypair, StrKey
 from stellar_sdk.client.response import Response
-from stellar_sdk.soroban.exceptions import RequestException
-from stellar_sdk.soroban.soroban_rpc import EventFilter
+from stellar_sdk.exceptions import SorobanRpcErrorResponse
+from stellar_sdk.soroban_rpc import EventFilter
 from stellar_sdk.xdr import (
     AccountID,
     Hash,
@@ -153,12 +153,12 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.side_effect = None, None, None, Exception("break retry")
 
         def func():
-            raise RequestException(message="start is after newest ledger", code=0)
+            raise SorobanRpcErrorResponse(message="start is after newest ledger", code=0)
 
         with override_settings(RETRY_DELAYS=(1, 2, 3, 4)), self.assertRaises(OutOfSyncException):
             retry("some description")(func)()
 
-        expected_err_msg = "RequestException (ahead of chain) while some description. Retrying in %ss ..."
+        expected_err_msg = "SorobanRpcErrorResponse (ahead of chain) while some description. Retrying in %ss ..."
         self.assertExactCalls(
             logger_mock.error,
             [*[call(expected_err_msg % i) for i in range(1, 4)], call("Breaking retry.")],
@@ -167,7 +167,7 @@ class SorobanTest(IntegrationTestCase):
 
     def test_retry_no_longer_available(self):
         def func():
-            raise RequestException(message="start is before oldest ledger", code=0)
+            raise SorobanRpcErrorResponse(message="start is before oldest ledger", code=0)
 
         with self.assertRaises(NoLongerAvailableException):
             retry("some description")(func)()
@@ -178,12 +178,12 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.side_effect = None, None, Exception("break retry")
 
         def func():
-            raise RequestException(message="404 Not Found", code=0)
+            raise SorobanRpcErrorResponse(message="404 Not Found", code=0)
 
         with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
             retry("some description")(func)()
 
-        expected_err_msg = "RequestException (404) while some description. Retrying in %ss ..."
+        expected_err_msg = "SorobanRpcErrorResponse (404) while some description. Retrying in %ss ..."
         logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
 
     @patch("core.soroban.slack_logger")
@@ -193,12 +193,12 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.side_effect = None, None, Exception("break retry")
 
         def func():
-            raise RequestException(message="wall of text", code=502)
+            raise SorobanRpcErrorResponse(message="wall of text", code=502)
 
         with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
             retry("some description")(func)()
 
-        expected_err_msg = "RequestException (502 Bad Gateway) while some description. Retrying in %ss ..."
+        expected_err_msg = "SorobanRpcErrorResponse (502 Bad Gateway) while some description. Retrying in %ss ..."
         logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
         slack_logger_mock.assert_not_called()
 
@@ -209,13 +209,13 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.side_effect = None, None, Exception("break retry")
 
         def func():
-            raise RequestException(message="wall of text", code=503)
+            raise SorobanRpcErrorResponse(message="wall of text", code=503)
 
         with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
             retry("some description")(func)()
 
         expected_err_msg = (
-            "RequestException (503 Service Temporarily Unavailable) while some description. Retrying in %ss ..."
+            "SorobanRpcErrorResponse (503 Service Temporarily Unavailable) while some description. Retrying in %ss ..."
         )
         logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
         slack_logger_mock.assert_not_called()
@@ -226,12 +226,12 @@ class SorobanTest(IntegrationTestCase):
         sleep_mock.side_effect = None, None, Exception("break retry")
 
         def func():
-            raise RequestException(message="some err", code=0)
+            raise SorobanRpcErrorResponse(message="some err", code=0)
 
         with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
             retry("some description")(func)()
 
-        expected_err_msg = "RequestException (some err) while some description. Retrying in %ss ..."
+        expected_err_msg = "SorobanRpcErrorResponse (some err) while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
 
     @patch("core.soroban.slack_logger")
@@ -272,7 +272,7 @@ class SorobanTest(IntegrationTestCase):
         request_body = Mock()
         server = RobustSorobanServer(server_url="some url", client=client_mock)
 
-        with self.assertRaises(RequestException):
+        with self.assertRaises(SorobanRpcErrorResponse):
             server._post(request_body=request_body, response_body_type=str)
 
     def test_RobustSorobanServer__post_json_err(self):
@@ -291,7 +291,7 @@ class SorobanTest(IntegrationTestCase):
         request_body = Mock()
         server = RobustSorobanServer(server_url="some url", client=client_mock)
 
-        with self.assertRaisesMessage(RequestException, "404 Not Found"):
+        with self.assertRaisesMessage(SorobanRpcErrorResponse, "404 Not Found"):
             server._post(request_body=request_body, response_body_type=str)
 
     @patch("core.soroban.SorobanServer.close")
@@ -561,9 +561,9 @@ class SorobanTest(IntegrationTestCase):
 
         def get_events(start_ledger):
             if start_ledger < start:
-                raise RequestException(0, message="start is before oldest ledger")
+                raise SorobanRpcErrorResponse(0, message="start is before oldest ledger")
             elif start_ledger > end:
-                raise RequestException(0, message="start is after newest ledger")
+                raise SorobanRpcErrorResponse(0, message="start is after newest ledger")
             return "smth"
 
         get_events_mock.side_effect = get_events
@@ -574,9 +574,9 @@ class SorobanTest(IntegrationTestCase):
 
     @patch("core.soroban.SorobanServer.get_events")
     def test_find_start_ledger_raises(self, get_events_mock):
-        get_events_mock.side_effect = RequestException(message="roar", code=0)
+        get_events_mock.side_effect = SorobanRpcErrorResponse(message="roar", code=0)
 
-        with self.assertRaisesMessage(RequestException, "roar"):
+        with self.assertRaisesMessage(SorobanRpcErrorResponse, "roar"):
             soroban_service.find_start_ledger()
 
     def test_get_events_filters(self):

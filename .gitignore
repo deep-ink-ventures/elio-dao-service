@@ -21,6 +21,7 @@ coverage-reports
 scripts
 x.py
 x2.py
+x.sh
 .envrc
 .direnv
 .devcontainer/
