@@ -7,7 +7,6 @@ from django.core.cache import cache
 from django.db import IntegrityError, connection
 from django.test import override_settings
 from stellar_sdk import Keypair, StrKey
-from stellar_sdk.client.response import Response
 from stellar_sdk.exceptions import SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import EventFilter
 from stellar_sdk.xdr import (
@@ -38,7 +37,6 @@ from core import models
 from core.soroban import (
     NoLongerAvailableException,
     OutOfSyncException,
-    RobustSorobanServer,
     retry,
     soroban_service,
     unpack_scval,
@@ -247,52 +245,6 @@ class SorobanTest(IntegrationTestCase):
 
         expected_err_msg = "Unexpected error while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
-
-    def test_RobustSorobanServer__post(self):
-        client_mock = Mock()
-        client_mock.post.return_value.json.return_value = {
-            "id": "asd",
-            "jsonrpc": "2.0",
-            "result": "asd",
-        }
-        request_body = Mock()
-        server = RobustSorobanServer(server_url="some url", client=client_mock)
-
-        res = server._post(request_body=request_body, response_body_type=str)
-
-        self.assertEqual(res, "asd")
-
-    def test_RobustSorobanServer__post_error(self):
-        client_mock = Mock()
-        client_mock.post.return_value.json.return_value = {
-            "id": "asd",
-            "jsonrpc": "2.0",
-            "error": {"code": -32600, "message": "start is after newest ledger"},
-        }
-        request_body = Mock()
-        server = RobustSorobanServer(server_url="some url", client=client_mock)
-
-        with self.assertRaises(SorobanRpcErrorResponse):
-            server._post(request_body=request_body, response_body_type=str)
-
-    def test_RobustSorobanServer__post_json_err(self):
-        client_mock = Mock()
-        client_mock.post.return_value = Response(
-            headers={
-                "Connection": "keep-alive",
-                "Content-Length": "13",
-                "Content-Type": "text/plain; charset=utf-8",
-                "Server": "awselb/2.0",
-            },
-            status_code=404,
-            text="404 Not Found",
-            url="some url",
-        )
-        request_body = Mock()
-        server = RobustSorobanServer(server_url="some url", client=client_mock)
-
-        with self.assertRaisesMessage(SorobanRpcErrorResponse, "404 Not Found"):
-            server._post(request_body=request_body, response_body_type=str)
 
     @patch("core.soroban.SorobanServer.close")
     def test___exit__(self, close_mock):

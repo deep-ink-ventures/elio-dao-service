@@ -1,20 +1,30 @@
 import base64
 import binascii
+import json
 import time
 from collections import defaultdict
 from functools import wraps
-from json import JSONDecodeError
 from logging import getLogger
-from typing import DefaultDict, Optional, Type
+from typing import DefaultDict, Optional
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
-from stellar_sdk import Keypair, SorobanServer, StrKey
+from stellar_sdk import Keypair, Network, SorobanServer, StrKey, TransactionBuilder
+from stellar_sdk import xdr as stellar_xdr
 from stellar_sdk.exceptions import SorobanRpcErrorResponse
-from stellar_sdk.soroban_rpc import EventFilter, Request, Response
-from stellar_sdk.soroban_server import V  # noqa
-from stellar_sdk.xdr import SCAddressType, SCVal, SCValType
+from stellar_sdk.soroban_rpc import (
+    EventFilter,
+    GetTransactionStatus,
+    SendTransactionStatus,
+)
+from stellar_sdk.xdr import (
+    OperationResultTr,
+    OperationType,
+    SCAddressType,
+    SCVal,
+    SCValType,
+)
 
 from core import models as core_models
 from core.event_handler import soroban_event_handler
@@ -60,6 +70,12 @@ def unpack_scval(val: SCVal):
         case _:
             slack_logger.error(f"Unhandled SCValType: {str(val)}")
             return str(val)
+
+
+def unpack_operation_result_tr(val: OperationResultTr):
+    match val.type:
+        case OperationType.INVOKE_HOST_FUNCTION:
+            return val.invoke_host_function_result.code
 
 
 def retry(description: str):
@@ -141,35 +157,68 @@ class NoLongerAvailableException(SorobanException):
     msg = "The requested ledger is no longer available."
 
 
-class RobustSorobanServer(SorobanServer):
-    """
-    added JSONDecodeError handling
-    """
-
-    def _post(self, request_body: Request, response_body_type: Type[V]) -> V:
-        json_data = request_body.dict(by_alias=True)
-        data = self._client.post(
-            self.server_url,
-            json_data=json_data,
-        )
-        try:
-            response = Response[response_body_type].parse_obj(data.json())
-        except JSONDecodeError:
-            raise SorobanRpcErrorResponse(code=data.status_code, message=data.text)
-        if response.error:
-            raise SorobanRpcErrorResponse(code=response.error.code, message=response.error.message)
-        return response.result
-
-
 class SorobanService(object):
-    soroban: RobustSorobanServer = None
+    soroban: SorobanServer = None
+    wait_for_txn_interval = 1  # seconds
 
     @retry("initializing blockchain connection")
     def __init__(self):
-        self.soroban = RobustSorobanServer(server_url=self.set_config()["blockchain_url"])
+        self.soroban = SorobanServer(server_url=self.set_config()["blockchain_url"])
+        self.multiclique_addr = settings.MULTICLIQUE_CONTRACT_ADDRESS
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
+
+    def invoke_contract_func(
+        self,
+        func_name: str,
+        func_args: list,
+        signers: [Keypair],
+        contract_addr: str = None,
+        base_fee=1000,
+        timeout=300,
+    ):
+        if contract_addr is None:
+            contract_addr = self.multiclique_addr
+
+        metadata = {
+            "contract_addr": contract_addr,
+            "func_name": func_name,
+            "func_args": [unpack_scval(arg) for arg in func_args],
+        }
+        transaction = self.soroban.prepare_transaction(
+            TransactionBuilder(
+                source_account=self.soroban.load_account(signers[0].public_key),
+                network_passphrase=Network.STANDALONE_NETWORK_PASSPHRASE,
+                base_fee=base_fee,
+            )
+            .set_timeout(timeout)
+            .append_invoke_contract_function_op(
+                contract_id=contract_addr,
+                function_name=func_name,
+                parameters=func_args,
+            )
+            .build()
+        )
+        transaction.transaction.fee *= 2
+        transaction.transaction.soroban_data.resources.instructions.uint32 *= 2
+        for signer in signers:
+            transaction.sign(signer)
+
+        res = self.soroban.send_transaction(transaction)
+        if res.status != SendTransactionStatus.PENDING:
+            err = stellar_xdr.TransactionResult.from_xdr(res.error_result_xdr).result.code.name
+            raise SorobanException(f"send_transaction failed: {err} | {json.dumps(metadata)}")
+
+        while (txn_res := self.soroban.get_transaction(res.hash)).status == GetTransactionStatus.NOT_FOUND:
+            time.sleep(self.wait_for_txn_interval)
+
+        if txn_res.status == GetTransactionStatus.FAILED:
+            txn_result = stellar_xdr.TransactionResult.from_xdr(txn_res.result_xdr)
+            errs = [unpack_operation_result_tr(result.tr).name for result in txn_result.result.results]
+            raise SorobanException(f"transaction failed: {errs} | {json.dumps(metadata)}")
+
+        return unpack_scval(stellar_xdr.TransactionMeta.from_xdr(txn_res.result_meta_xdr).v3.soroban_meta.return_value)
 
     @staticmethod
     def verify(address: str, challenge_address: str, signature: str) -> bool:
@@ -248,6 +297,8 @@ class SorobanService(object):
         data = {
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
+            "multiclique_contract_address": settings.MULTICLIQUE_CONTRACT_ADDRESS,
+            "policy_contract_address": settings.POLICY_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
             "blockchain_url": settings.BLOCKCHAIN_URL,
             "network_passphrase": settings.NETWORK_PASSPHRASE,
@@ -262,6 +313,8 @@ class SorobanService(object):
         sets "trusted_contract_ids" to
             cache["config"]["core_contract_address"],
             cache["config"]["votes_contract_address"],
+            cache["config"]["multiclique_contract_address"],
+            cache["config"]["policy_contract_address"],
             all Asset IDs
 
         Returns:
@@ -271,6 +324,8 @@ class SorobanService(object):
         trusted_contract_ids = [
             binascii.hexlify(StrKey.decode_contract(config["core_contract_address"])),
             binascii.hexlify(StrKey.decode_contract(config["votes_contract_address"])),
+            binascii.hexlify(StrKey.decode_contract(config["multiclique_contract_address"])),
+            binascii.hexlify(StrKey.decode_contract(config["policy_contract_address"])),
             *core_models.Asset.objects.values_list("id", flat=True),
         ]
         cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
@@ -379,7 +434,7 @@ class SorobanService(object):
             if cache.get("restart_listener"):
                 logger.info("Restarting listener...")
                 self.soroban.close()
-                self.soroban = retry("reinitializing blockchain connection")(RobustSorobanServer)(
+                self.soroban = retry("reinitializing blockchain connection")(SorobanServer)(
                     server_url=self.set_config()["blockchain_url"]
                 )
                 cache.delete("restart_listener")
