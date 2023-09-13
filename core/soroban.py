@@ -10,7 +10,7 @@ from typing import DefaultDict, Optional
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
-from stellar_sdk import Keypair, Network, SorobanServer, StrKey, TransactionBuilder
+from stellar_sdk import Keypair, SorobanServer, StrKey, TransactionBuilder
 from stellar_sdk import xdr as stellar_xdr
 from stellar_sdk.exceptions import SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import (
@@ -159,11 +159,13 @@ class NoLongerAvailableException(SorobanException):
 
 class SorobanService(object):
     soroban: SorobanServer = None
-    wait_for_txn_interval = 1  # seconds
+    network_passphrase: str = None
+    wait_for_txn_interval: int = 1  # seconds
 
     @retry("initializing blockchain connection")
     def __init__(self):
         self.soroban = SorobanServer(server_url=self.set_config()["blockchain_url"])
+        self.network_passphrase = settings.NETWORK_PASSPHRASE
         self.multiclique_addr = settings.MULTICLIQUE_CONTRACT_ADDRESS
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -189,7 +191,7 @@ class SorobanService(object):
         transaction = self.soroban.prepare_transaction(
             TransactionBuilder(
                 source_account=self.soroban.load_account(signers[0].public_key),
-                network_passphrase=Network.STANDALONE_NETWORK_PASSPHRASE,
+                network_passphrase=self.network_passphrase,
                 base_fee=base_fee,
             )
             .set_timeout(timeout)
@@ -205,20 +207,22 @@ class SorobanService(object):
         for signer in signers:
             transaction.sign(signer)
 
-        res = self.soroban.send_transaction(transaction)
-        if res.status != SendTransactionStatus.PENDING:
-            err = stellar_xdr.TransactionResult.from_xdr(res.error_result_xdr).result.code.name
+        send_txn_res = self.soroban.send_transaction(transaction)
+        if send_txn_res.status != SendTransactionStatus.PENDING:
+            err = stellar_xdr.TransactionResult.from_xdr(send_txn_res.error_result_xdr).result.code.name
             raise SorobanException(f"send_transaction failed: {err} | {json.dumps(metadata)}")
 
-        while (txn_res := self.soroban.get_transaction(res.hash)).status == GetTransactionStatus.NOT_FOUND:
+        while (get_txn_res := self.soroban.get_transaction(send_txn_res.hash)).status == GetTransactionStatus.NOT_FOUND:
             time.sleep(self.wait_for_txn_interval)
 
-        if txn_res.status == GetTransactionStatus.FAILED:
-            txn_result = stellar_xdr.TransactionResult.from_xdr(txn_res.result_xdr)
+        if get_txn_res.status == GetTransactionStatus.FAILED:
+            txn_result = stellar_xdr.TransactionResult.from_xdr(get_txn_res.result_xdr)
             errs = [unpack_operation_result_tr(result.tr).name for result in txn_result.result.results]
             raise SorobanException(f"transaction failed: {errs} | {json.dumps(metadata)}")
 
-        return unpack_scval(stellar_xdr.TransactionMeta.from_xdr(txn_res.result_meta_xdr).v3.soroban_meta.return_value)
+        return unpack_scval(
+            stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value
+        )
 
     @staticmethod
     def verify(address: str, challenge_address: str, signature: str) -> bool:
