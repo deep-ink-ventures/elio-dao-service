@@ -23,6 +23,14 @@ class LoggerTest(UnitTestCase):
                         "value": settings.VOTES_CONTRACT_ADDRESS,
                     },
                     {
+                        "title": "multiclique_contract_address",
+                        "value": settings.MULTICLIQUE_CONTRACT_ADDRESS,
+                    },
+                    {
+                        "title": "policy_contract_address",
+                        "value": settings.POLICY_CONTRACT_ADDRESS,
+                    },
+                    {
                         "title": "assets_wasm_hash",
                         "value": settings.ASSETS_WASM_HASH,
                     },

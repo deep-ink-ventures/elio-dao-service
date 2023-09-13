@@ -1,6 +1,5 @@
 import base64
 import binascii
-import json
 import time
 from collections import defaultdict
 from functools import wraps
@@ -24,6 +23,7 @@ from stellar_sdk.xdr import (
     SCAddressType,
     SCVal,
     SCValType,
+    SCVec,
 )
 
 from core import models as core_models
@@ -33,12 +33,15 @@ logger = getLogger("alerts")
 slack_logger = getLogger("alerts.slack")
 
 
-def unpack_scval(val: SCVal):
+def unpack_sc(val: [SCVal, SCVec]):
+    if isinstance(val, SCVec):
+        return [unpack_sc(_val) for _val in val.sc_vec]
+
     match val.type:
         case SCValType.SCV_MAP:
-            return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
+            return {unpack_sc(entry.key): unpack_sc(entry.val) for entry in val.map.sc_map}
         case SCValType.SCV_VEC:
-            return [unpack_scval(entry) for entry in val.vec.sc_vec]
+            return [unpack_sc(entry) for entry in val.vec.sc_vec]
         case SCValType.SCV_VOID:
             return
         case SCValType.SCV_BOOL:
@@ -67,6 +70,11 @@ def unpack_scval(val: SCVal):
             return val.u128.hi.uint64 << 64 | val.u128.lo.uint64
         case SCValType.SCV_I128:
             return val.i128.hi.int64 << 64 | val.i128.lo.uint64
+        case SCValType.SCV_ERROR:
+            err = val.error
+            return f"type: {err.type.name}: {err.type.value} | code: {err.code.name}: {err.code.value}"
+        case SCValType.SCV_STRING:
+            return val.str.sc_string.decode()
         case _:
             slack_logger.error(f"Unhandled SCValType: {str(val)}")
             return str(val)
@@ -143,8 +151,10 @@ def retry(description: str):
 
 class SorobanException(Exception):
     msg = None
+    ctx = None
 
-    def __init__(self, *args):
+    def __init__(self, *args, ctx=None):
+        self.ctx = ctx
         args = (self.msg,) if not args else args
         super().__init__(*args)
 
@@ -164,9 +174,10 @@ class SorobanService(object):
 
     @retry("initializing blockchain connection")
     def __init__(self):
-        self.soroban = SorobanServer(server_url=self.set_config()["blockchain_url"])
-        self.network_passphrase = settings.NETWORK_PASSPHRASE
-        self.multiclique_addr = settings.MULTICLIQUE_CONTRACT_ADDRESS
+        config = self.set_config()
+        self.soroban = SorobanServer(server_url=config["blockchain_url"])
+        self.network_passphrase = config["network_passphrase"]
+        self.multiclique_addr = config["multiclique_contract_address"]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
@@ -186,7 +197,7 @@ class SorobanService(object):
         metadata = {
             "contract_addr": contract_addr,
             "func_name": func_name,
-            "func_args": [unpack_scval(arg) for arg in func_args],
+            "func_args": [unpack_sc(arg) for arg in func_args],
         }
         transaction = self.soroban.prepare_transaction(
             TransactionBuilder(
@@ -210,19 +221,30 @@ class SorobanService(object):
         send_txn_res = self.soroban.send_transaction(transaction)
         if send_txn_res.status != SendTransactionStatus.PENDING:
             err = stellar_xdr.TransactionResult.from_xdr(send_txn_res.error_result_xdr).result.code.name
-            raise SorobanException(f"send_transaction failed: {err} | {json.dumps(metadata)}")
+            raise SorobanException(f"send_transaction failed: {err}", ctx=metadata)
 
         while (get_txn_res := self.soroban.get_transaction(send_txn_res.hash)).status == GetTransactionStatus.NOT_FOUND:
             time.sleep(self.wait_for_txn_interval)
 
         if get_txn_res.status == GetTransactionStatus.FAILED:
-            txn_result = stellar_xdr.TransactionResult.from_xdr(get_txn_res.result_xdr)
-            errs = [unpack_operation_result_tr(result.tr).name for result in txn_result.result.results]
-            raise SorobanException(f"transaction failed: {errs} | {json.dumps(metadata)}")
+            result_xdr = stellar_xdr.TransactionResult.from_xdr(get_txn_res.result_xdr)
+            meta_xdr = stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr)
+            errs = [unpack_operation_result_tr(result.tr).name for result in result_xdr.result.results]
+            diagnostic_events = []
+            for event in meta_xdr.v3.soroban_meta.diagnostic_events:
+                body = getattr(event.event.body, f"v{event.event.body.v}")
+                diagnostic_events.append(
+                    {
+                        "in_successful_contract_call": event.in_successful_contract_call,
+                        "topics": unpack_sc(body.topics),
+                        "data": unpack_sc(body.data),
+                    }
+                )
+            raise SorobanException(
+                f"transaction failed: {errs}", ctx={"diagnostic_events": diagnostic_events, **metadata}
+            )
 
-        return unpack_scval(
-            stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value
-        )
+        return unpack_sc(stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value)
 
     @staticmethod
     def verify(address: str, challenge_address: str, signature: str) -> bool:
@@ -418,8 +440,8 @@ class SorobanService(object):
                     (
                         event.contract_id,
                         event.id,
-                        [unpack_scval(SCVal.from_xdr(topic)) for topic in event.topic],
-                        unpack_scval(SCVal.from_xdr(event.value.xdr)),
+                        [unpack_sc(SCVal.from_xdr(topic)) for topic in event.topic],
+                        unpack_sc(SCVal.from_xdr(event.value.xdr)),
                     )
                 )
 
