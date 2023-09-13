@@ -232,9 +232,12 @@ class SorobanService(object):
             errs = [unpack_operation_result_tr(result.tr).name for result in result_xdr.result.results]
             diagnostic_events = []
             for event in meta_xdr.v3.soroban_meta.diagnostic_events:
-                body = getattr(event.event.body, f"v{event.event.body.v}")
+                _event = event.event
+                body = getattr(_event.body, f"v{_event.body.v}")
                 diagnostic_events.append(
                     {
+                        "contract_id": _event.contract_id and StrKey.encode_contract(_event.contract_id.hash),
+                        "type": _event.type.name,
                         "in_successful_contract_call": event.in_successful_contract_call,
                         "topics": unpack_sc(body.topics),
                         "data": unpack_sc(body.data),
