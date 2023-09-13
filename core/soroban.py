@@ -20,10 +20,14 @@ from stellar_sdk.soroban_rpc import (
 from stellar_sdk.xdr import (
     OperationResultTr,
     OperationType,
+    SCAddress,
     SCAddressType,
     SCVal,
     SCValType,
     SCVec,
+    SorobanAddressCredentials,
+    SorobanCredentials,
+    SorobanCredentialsType,
 )
 
 from core import models as core_models
@@ -199,7 +203,7 @@ class SorobanService(object):
             "func_name": func_name,
             "func_args": [unpack_sc(arg) for arg in func_args],
         }
-        transaction = self.soroban.prepare_transaction(
+        transaction = (
             TransactionBuilder(
                 source_account=self.soroban.load_account(signers[0].public_key),
                 network_passphrase=self.network_passphrase,
@@ -213,6 +217,27 @@ class SorobanService(object):
             )
             .build()
         )
+        sim_txn = self.soroban.simulate_transaction(transaction)
+        auth = stellar_xdr.SorobanAuthorizationEntry.from_xdr(sim_txn.results[0].auth[0])
+        _auth = auth.credentials.address
+        new_auth = stellar_xdr.SorobanAuthorizationEntry(
+            credentials=SorobanCredentials(
+                type=SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS,
+                address=SorobanAddressCredentials(
+                    address=SCAddress(
+                        type=SCAddressType.SC_ADDRESS_TYPE_ACCOUNT,
+                        account_id=signers[0].xdr_account_id(),
+                    ),
+                    nonce=_auth.nonce,
+                    signature_expiration_ledger=_auth.signature_expiration_ledger,
+                    signature_args=SCVec([]),
+                ),
+            ),
+            root_invocation=auth.root_invocation,
+        )
+
+        transaction.transaction.operations[0].auth.append(new_auth)
+        transaction = self.soroban.prepare_transaction(transaction)
         transaction.transaction.fee *= 2
         transaction.transaction.soroban_data.resources.instructions.uint32 *= 2
         for signer in signers:
