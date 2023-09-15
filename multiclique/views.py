@@ -1,12 +1,21 @@
 import os
 
 from django.conf import settings
+from django.utils.timezone import now
+from drf_yasg import openapi
+from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.decorators import api_view
+from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
+from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED
+from rest_framework.viewsets import ReadOnlyModelViewSet
 from stellar_sdk import TransactionBuilder
 from stellar_sdk.exceptions import PrepareTransactionException
 
+from core.view_utils import MultiQsLimitOffsetPagination, SearchableMixin
+
+from . import models, serializers
 from .serializers import InstallAccountAndPolicySerializer
 
 MULTICLIQUE_WASM = "e5fafe7d0240f37cb75ce391398a4e0d1d628eff89d04f62d2cde65489aa0f8e"
@@ -57,3 +66,51 @@ def install_account_and_policy(request):
                 status=status.HTTP_200_OK,
             )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MultiSigViewSet(ReadOnlyModelViewSet, CreateModelMixin, SearchableMixin):
+    queryset = models.MultiSig.objects.all()
+    pagination_class = MultiQsLimitOffsetPagination
+    serializer_class = serializers.MultiSigSerializer
+    filter_fields = ["dao_id"]
+    search_fields = ["address", "dao__id"]
+    ordering_fields = ["address", "dao_id"]
+    lookup_field = "address"
+
+    @swagger_auto_schema(
+        operation_id="Create / Update MultiSig Account",
+        operation_description="Creates or updates a MultiSig Account",
+        request_body=serializers.CreateMultiSigSerializer,
+        responses={201: openapi.Response("", serializers.MultiSigSerializer)},
+        security=[{"Basic": []}],
+    )
+    def create(self, request, *args, **kwargs):
+        from core.substrate import substrate_service
+
+        serializer = serializers.CreateMultiSigSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.data
+        address = substrate_service.create_multisig_account(
+            signatories=data["signatories"], threshold=data["threshold"]
+        ).ss58_address
+        multisig_acc, created = models.MultiSig.objects.update_or_create(
+            address=address,
+            defaults={
+                "signatories": data["signatories"],
+                "threshold": data["threshold"],
+                "created_at": now(),  # needed cause of some bug for the kind of inheritance the model uses
+            },
+        )
+        res_data = self.get_serializer(multisig_acc).data
+        return Response(
+            data=res_data,
+            status=HTTP_201_CREATED if created else HTTP_200_OK,
+            headers=self.get_success_headers(data=res_data),
+        )
+
+
+class MultiSigTransactionViewSet(ReadOnlyModelViewSet, SearchableMixin):
+    queryset = models.MultiSigTransaction.objects.all()
+    serializer_class = serializers.MultiSigTransactionSerializer
+    filter_fields = ["asset_id", "dao_id", "proposal_id", "call_hash"]
+    ordering_fields = ["call_hash", "call_function", "status", "executed_at"]

@@ -4,19 +4,28 @@ import time
 from collections import defaultdict
 from functools import wraps
 from logging import getLogger
-from typing import DefaultDict, Optional
+from typing import Callable, DefaultDict, Optional, Union
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
-from stellar_sdk import Keypair, SorobanServer, StrKey, TransactionBuilder
+from stellar_sdk import (
+    Address,
+    Keypair,
+    Network,
+    SorobanServer,
+    StrKey,
+    TransactionBuilder,
+    scval,
+)
 from stellar_sdk import xdr as stellar_xdr
-from stellar_sdk.exceptions import SorobanRpcErrorResponse
+from stellar_sdk.exceptions import BadSignatureError, SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import (
     EventFilter,
     GetTransactionStatus,
     SendTransactionStatus,
 )
+from stellar_sdk.utils import sha256
 from stellar_sdk.xdr import (
     OperationResultTr,
     OperationType,
@@ -186,6 +195,49 @@ class SorobanService(object):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
 
+    def authorize_entry(
+        self,
+        entry: stellar_xdr.SorobanAuthorizationEntry,
+        signer: Union[Keypair, Callable[[stellar_xdr.SorobanAuthorizationEntry], bytes]],
+        valid_until_ledger_sequence: int,
+    ):
+        if entry.credentials.type != stellar_xdr.SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS:
+            return
+
+        addr_auth = entry.credentials.address
+        addr_auth.signature_expiration_ledger = stellar_xdr.Uint32(valid_until_ledger_sequence)
+
+        network_id = Network(self.network_passphrase).network_id()
+        preimage = stellar_xdr.HashIDPreimage(
+            type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
+            soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
+                network_id=stellar_xdr.Hash(network_id),
+                nonce=addr_auth.nonce,
+                signature_expiration_ledger=addr_auth.signature_expiration_ledger,
+                invocation=entry.root_invocation,
+            ),
+        )
+        payload = sha256(preimage.to_xdr_bytes())
+
+        if isinstance(signer, Keypair):
+            signature = signer.sign(payload)
+        else:
+            signature = signer(entry)
+
+        public_key = Address.from_xdr_sc_address(addr_auth.address).key
+        try:
+            Keypair.from_raw_ed25519_public_key(public_key).verify(payload, signature)
+        except BadSignatureError as e:
+            raise ValueError("signature doesn't match payload.") from e
+
+        sig_scval = scval.to_map(
+            {
+                scval.to_symbol("public_key"): scval.to_bytes(public_key),
+                scval.to_symbol("signature"): scval.to_bytes(signature),
+            }
+        )
+        addr_auth.signature_args = scval.to_vec([sig_scval])
+
     def invoke_contract_func(
         self,
         func_name: str,
@@ -218,8 +270,14 @@ class SorobanService(object):
             .build()
         )
         sim_txn = self.soroban.simulate_transaction(transaction)
-        auth = stellar_xdr.SorobanAuthorizationEntry.from_xdr(sim_txn.results[0].auth[0])
-        _auth = auth.credentials.address
+        auth_entry = stellar_xdr.SorobanAuthorizationEntry.from_xdr(sim_txn.results[0].auth[0])
+        self.authorize_entry(
+            entry=auth_entry,
+            signer=signers[0],
+            valid_until_ledger_sequence=auth_entry.credentials.address.signature_expiration_ledger.uint32
+            # valid_until_ledger_sequence=1_000_000,
+        )
+        _auth = auth_entry.credentials.address
         new_auth = stellar_xdr.SorobanAuthorizationEntry(
             credentials=SorobanCredentials(
                 type=SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS,
@@ -233,10 +291,10 @@ class SorobanService(object):
                     signature_args=SCVec([]),
                 ),
             ),
-            root_invocation=auth.root_invocation,
+            root_invocation=auth_entry.root_invocation,
         )
-
         transaction.transaction.operations[0].auth.append(new_auth)
+
         transaction = self.soroban.prepare_transaction(transaction)
         transaction.transaction.fee *= 2
         transaction.transaction.soroban_data.resources.instructions.uint32 *= 2
