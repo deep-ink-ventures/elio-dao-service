@@ -38,6 +38,7 @@ from core import models
 from core.soroban import (
     NoLongerAvailableException,
     OutOfSyncException,
+    RestartListenerException,
     RobustSorobanServer,
     retry,
     soroban_service,
@@ -221,6 +222,26 @@ class SorobanTest(IntegrationTestCase):
         slack_logger_mock.assert_not_called()
 
     @patch("core.soroban.slack_logger")
+    @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    def test_retry_32602(self, sleep_mock, logger_mock, slack_logger_mock):
+        sleep_mock.side_effect = None, None, Exception("break retry")
+
+        def func():
+            raise SorobanRpcErrorResponse(message="some err", code=-32602)
+
+        cache.set("trusted_contract_ids", ["1", "2"])
+        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
+            retry("some description")(func)()
+
+        expected_err_msg = (
+            "SorobanRpcErrorResponse (some err) "
+            "(trusted_contract_ids: ['1', '2']) while some description. Retrying in %ss ..."
+        )
+        slack_logger_mock.error.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+        logger_mock.assert_not_called()
+
+    @patch("core.soroban.slack_logger")
     @patch("core.soroban.time.sleep")
     def test_retry_other_request_exception(self, sleep_mock, logger_mock):
         sleep_mock.side_effect = None, None, Exception("break retry")
@@ -247,6 +268,20 @@ class SorobanTest(IntegrationTestCase):
 
         expected_err_msg = "Unexpected error while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
+
+    @patch("core.soroban.slack_logger")
+    @patch("core.soroban.time.sleep")
+    def test_retry_restart_listener(self, sleep_mock, logger_mock):
+        cache.set(key="restart_listener", value=True)
+
+        def func():
+            raise Exception("roar")
+
+        with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaises(RestartListenerException):
+            retry("some description")(func)()
+
+        logger_mock.exception.assert_called_once_with("Unexpected error while some description. Retrying in 1s ...")
+        sleep_mock.assert_not_called()
 
     def test_RobustSorobanServer__post(self):
         client_mock = Mock()
@@ -918,6 +953,28 @@ class SorobanTest(IntegrationTestCase):
         find_start_ledger_mock.assert_called_once_with(lower_bound=3)
         clear_db_and_cache_mock.assert_not_called()
         fetch_event_data_mock.assert_called_once_with(start_ledger=4)
+
+    @patch("core.soroban.SorobanService.clear_db_and_cache")
+    @patch("core.soroban.SorobanService.find_start_ledger")
+    @patch("core.soroban.SorobanService.fetch_event_data")
+    @patch("core.soroban.logger")
+    @patch("core.soroban.time.sleep")
+    @patch("core.soroban.time.time")
+    def test_listen_RestartListenerException(
+        self, time_mock, sleep_mock, logger_mock, fetch_event_data_mock, find_start_ledger_mock, clear_db_and_cache_mock
+    ):
+        time_mock.return_value = 10
+        sleep_mock.side_effect = BreakRetry
+        fetch_event_data_mock.side_effect = RestartListenerException
+        models.Block.objects.create(number=3, executed=True)
+
+        with self.assertRaises(BreakRetry):
+            soroban_service.listen()
+
+        logger_mock.info.assert_called_once_with("Listening... Latest block number: 4")
+        fetch_event_data_mock.assert_called_once_with(start_ledger=4)
+        find_start_ledger_mock.assert_not_called()
+        clear_db_and_cache_mock.assert_not_called()
 
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.soroban.SorobanService.find_start_ledger")

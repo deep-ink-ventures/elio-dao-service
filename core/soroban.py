@@ -91,6 +91,12 @@ def retry(description: str):
                     _logger.exception(err_msg)
                 else:
                     _logger.error(err_msg)
+
+                # respect restart_listener flag
+                # avoids getting stuck in retry with outdated args
+                if cache.get("restart_listener"):
+                    raise RestartListenerException
+
                 time.sleep(retry_delay)
 
             while True:
@@ -115,6 +121,12 @@ def retry(description: str):
                                         "SorobanRpcErrorResponse (503 Service Temporarily Unavailable)",
                                         log_to_slack=False,
                                     )
+                                case -32602:  # invalid filter
+                                    msg = (
+                                        f"SorobanRpcErrorResponse ({exc.message}) "
+                                        f"(trusted_contract_ids: {cache.get('trusted_contract_ids')})"
+                                    )
+                                    log_and_sleep(msg)
                                 case _:
                                     log_and_sleep(f"SorobanRpcErrorResponse ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
@@ -125,12 +137,15 @@ def retry(description: str):
     return wrap
 
 
+class RestartListenerException(Exception):
+    pass
+
+
 class SorobanException(Exception):
     msg = None
 
-    def __init__(self, *args):
-        args = (self.msg,) if not args else args
-        super().__init__(*args)
+    def __init__(self, *_, **__):
+        super().__init__(self.msg)
 
 
 class OutOfSyncException(SorobanException):
@@ -402,6 +417,8 @@ class SorobanService(object):
                     cache.set(key="restart_listener", value=True)
                 except NoLongerAvailableException:
                     latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
+                except RestartListenerException:
+                    pass
                 else:
                     latest_block_number += 1
 
