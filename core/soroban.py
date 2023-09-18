@@ -313,6 +313,7 @@ class SorobanService(object):
         self.authorize_entry(
             entry=auth_entry,
             signer=signers[0],
+            # valid_until_ledger_sequence=transaction.transaction.sequence,
             valid_until_ledger_sequence=auth_entry.credentials.address.signature_expiration_ledger.uint32
             # valid_until_ledger_sequence=1_000_000,
         )
