@@ -5,7 +5,7 @@ from collections import defaultdict
 from functools import wraps
 from json import JSONDecodeError
 from logging import getLogger
-from typing import Callable, DefaultDict, Optional, Union
+from typing import Callable, DefaultDict, Optional, Type, Union
 
 from django.conf import settings
 from django.core.cache import cache
@@ -24,8 +24,11 @@ from stellar_sdk.exceptions import BadSignatureError, SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import (
     EventFilter,
     GetTransactionStatus,
+    Request,
+    Response,
     SendTransactionStatus,
 )
+from stellar_sdk.soroban_server import V
 from stellar_sdk.utils import sha256
 from stellar_sdk.xdr import (
     OperationResultTr,
