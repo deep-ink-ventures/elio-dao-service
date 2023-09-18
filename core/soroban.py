@@ -3,6 +3,7 @@ import binascii
 import time
 from collections import defaultdict
 from functools import wraps
+from json import JSONDecodeError
 from logging import getLogger
 from typing import Callable, DefaultDict, Optional, Union
 
@@ -128,6 +129,12 @@ def retry(description: str):
                     _logger.exception(err_msg)
                 else:
                     _logger.error(err_msg)
+
+                # respect restart_listener flag
+                # avoids getting stuck in retry with outdated args
+                if cache.get("restart_listener"):
+                    raise RestartListenerException
+
                 time.sleep(retry_delay)
 
             while True:
@@ -152,6 +159,12 @@ def retry(description: str):
                                         "SorobanRpcErrorResponse (503 Service Temporarily Unavailable)",
                                         log_to_slack=False,
                                     )
+                                case -32602:  # invalid filter
+                                    msg = (
+                                        f"SorobanRpcErrorResponse ({exc.message}) "
+                                        f"(trusted_contract_ids: {cache.get('trusted_contract_ids')})"
+                                    )
+                                    log_and_sleep(msg)
                                 case _:
                                     log_and_sleep(f"SorobanRpcErrorResponse ({exc.message})", log_exception=True)
                 except Exception:  # noqa E722
@@ -162,14 +175,17 @@ def retry(description: str):
     return wrap
 
 
+class RestartListenerException(Exception):
+    pass
+
+
 class SorobanException(Exception):
     msg = None
     ctx = None
 
-    def __init__(self, *args, ctx=None):
+    def __init__(self, *_, ctx=None):
         self.ctx = ctx
-        args = (self.msg,) if not args else args
-        super().__init__(*args)
+        super().__init__(self.msg)
 
 
 class OutOfSyncException(SorobanException):
@@ -180,15 +196,35 @@ class NoLongerAvailableException(SorobanException):
     msg = "The requested ledger is no longer available."
 
 
+class RobustSorobanServer(SorobanServer):
+    """
+    added JSONDecodeError handling
+    """
+
+    def _post(self, request_body: Request, response_body_type: Type[V]) -> V:
+        json_data = request_body.dict(by_alias=True)
+        data = self._client.post(
+            self.server_url,
+            json_data=json_data,
+        )
+        try:
+            response = Response[response_body_type].parse_obj(data.json())
+        except JSONDecodeError:
+            raise SorobanRpcErrorResponse(code=data.status_code, message=data.text)
+        if response.error:
+            raise SorobanRpcErrorResponse(code=response.error.code, message=response.error.message)
+        return response.result
+
+
 class SorobanService(object):
-    soroban: SorobanServer = None
+    soroban: RobustSorobanServer = None
     network_passphrase: str = None
     wait_for_txn_interval: int = 1  # seconds
 
     @retry("initializing blockchain connection")
     def __init__(self):
         config = self.set_config()
-        self.soroban = SorobanServer(server_url=config["blockchain_url"])
+        self.soroban = RobustSorobanServer(server_url=config["blockchain_url"])
         self.network_passphrase = config["network_passphrase"]
         self.multiclique_addr = config["multiclique_contract_address"]
 
@@ -569,6 +605,8 @@ class SorobanService(object):
                     cache.set(key="restart_listener", value=True)
                 except NoLongerAvailableException:
                     latest_block_number = self.find_start_ledger(lower_bound=latest_block and latest_block.number or 0)
+                except RestartListenerException:
+                    pass
                 else:
                     latest_block_number += 1
 
