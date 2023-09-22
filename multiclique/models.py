@@ -11,8 +11,8 @@ class MultiCliquePolicy(TimestampableMixin):
 
     class Meta:
         db_table = "multiclique_policies"
-        verbose_name = "MultiCliqueAccount Policy"
-        verbose_name_plural = "MultiCliqueAccount Policies"
+        verbose_name = "MultiClique Policy"
+        verbose_name_plural = "MultiClique Policies"
 
 
 class MultiCliqueAccount(TimestampableMixin):
@@ -52,8 +52,8 @@ class MultiCliqueTransaction(TimestampableMixin):
 
     class Meta:
         db_table = "multiclique_transactions"
-        verbose_name = "MultiCliqueAccount Transaction"
-        verbose_name_plural = "MultiCliqueAccount Transactions"
+        verbose_name = "MultiClique Transaction"
+        verbose_name_plural = "MultiClique Transactions"
 
     def __str__(self):
         return f"XDR: {self.xdr[:20]}..."
