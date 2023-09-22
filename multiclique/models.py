@@ -32,18 +32,19 @@ class MultiCliqueAccount(TimestampableMixin):
 
 class TransactionStatus(ChoiceEnum):
     PENDING = "pending"
-    APPROVED = "approved"
     REJECTED = "rejected"
+    EXECUTABLE = "executable"
     EXECUTED = "executed"
 
 
 class MultiCliqueTransaction(TimestampableMixin):
-    xdr = models.CharField(max_length=1024)
+    xdr = models.CharField(max_length=4096)
     preimage_hash = models.CharField(max_length=1024)
     call_func = models.CharField(max_length=256, null=True)
     call_args = models.JSONField(null=True)
     multiclique_account = models.ForeignKey(MultiCliqueAccount, related_name="transactions", on_delete=models.CASCADE)
-    signers = ArrayField(models.CharField(max_length=256), default=list)
+    approvers = ArrayField(models.CharField(max_length=256), default=list)
+    rejecters = ArrayField(models.CharField(max_length=256), default=list)
     status = models.CharField(max_length=16, choices=TransactionStatus.as_choices(), default=TransactionStatus.PENDING)
     executed_at = models.DateTimeField(null=True, blank=True)
 

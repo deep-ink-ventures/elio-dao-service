@@ -140,12 +140,12 @@ class SorobanTest(IntegrationTestCase):
         ),
     )
     @patch("core.soroban.slack_logger")
-    def test_unpack_scval(self, case, slack_logger):
+    def test_unpack_sc(self, case, slack_logger):
         input_value, expected = case
 
         self.assertEqual(unpack_sc(input_value), expected, input_value)
         if isinstance(expected, str) and "SCVal" in expected:
-            slack_logger.error.assert_called_once_with(f"Unhandled SCValType: {expected}")
+            slack_logger.error.assert_called_once_with(f"Unhandled SC(Val)Type: {expected}")
 
     @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
