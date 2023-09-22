@@ -3,7 +3,7 @@ services:
   app:
     build:
       context: .
-    container_name: app
+    container_name: elio-app
     image: app:latest
     command: ["web"]
     env_file:
@@ -19,7 +19,7 @@ services:
   listener:
     build:
       context: .
-    container_name: listener
+    container_name: elio-listener
     image: listener:latest
     command: [ "listener" ]
     env_file:
@@ -29,7 +29,7 @@ services:
     depends_on: *deps
 
   worker:
-    container_name: worker
+    container_name: elio-worker
     image: app:latest
     command: ["worker"]
     env_file:
@@ -39,7 +39,7 @@ services:
     depends_on: *deps
 
   postgres:
-    container_name: postgres
+    container_name: elio-postgres
     image: postgres:14.1-alpine
     command: -p ${DATABASE_PORT:-5432}
     environment:
@@ -52,7 +52,7 @@ services:
       - postgres:/var/lib/postgresql
 
   redis:
-    container_name: redis
+    container_name: elio-redis
     image: redis:5-alpine
     command: --port ${REDIS_PORT:-6379}
     ports:

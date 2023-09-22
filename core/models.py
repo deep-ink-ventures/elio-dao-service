@@ -13,11 +13,11 @@ class TimestampableMixin(models.Model):
 
 
 class Contract(TimestampableMixin):
-    id = models.CharField(max_length=128, primary_key=True)
+    id = models.CharField(primary_key=True, max_length=128)
 
 
 class Account(TimestampableMixin):
-    address = models.CharField(primary_key=True, max_length=128, unique=True, editable=False)
+    address = models.CharField(primary_key=True, max_length=128)
 
     class Meta:
         verbose_name = "Account"

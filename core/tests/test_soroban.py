@@ -42,7 +42,7 @@ from core.soroban import (
     RobustSorobanServer,
     retry,
     soroban_service,
-    unpack_scval,
+    unpack_sc,
 )
 from core.tests.testcases import IntegrationTestCase
 
@@ -140,12 +140,12 @@ class SorobanTest(IntegrationTestCase):
         ),
     )
     @patch("core.soroban.slack_logger")
-    def test_unpack_scval(self, case, slack_logger):
+    def test_unpack_sc(self, case, slack_logger):
         input_value, expected = case
 
-        self.assertEqual(unpack_scval(input_value), expected, input_value)
+        self.assertEqual(unpack_sc(input_value), expected, input_value)
         if isinstance(expected, str) and "SCVal" in expected:
-            slack_logger.error.assert_called_once_with(f"Unhandled SCValType: {expected}")
+            slack_logger.error.assert_called_once_with(f"Unhandled SC(Val)Type: {expected}")
 
     @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")
@@ -458,9 +458,11 @@ class SorobanTest(IntegrationTestCase):
             data={
                 "core_contract_address": "a",
                 "votes_contract_address": "b",
-                "assets_wasm_hash": "c",
-                "blockchain_url": "d",
-                "network_passphrase": "e",
+                "multiclique_contract_address": "c",
+                "policy_contract_address": "d",
+                "assets_wasm_hash": "e",
+                "blockchain_url": "f",
+                "network_passphrase": "g",
             }
         )
 
@@ -470,6 +472,8 @@ class SorobanTest(IntegrationTestCase):
                 new_config={
                     "core_contract_address": "1",
                     "votes_contract_address": "2",
+                    "multiclique_contract_address": "3",
+                    "policy_contract_address": "4",
                 },
             )
         self.assertEqual(
@@ -477,9 +481,11 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": "1",
                 "votes_contract_address": "2",
-                "assets_wasm_hash": "some_wasm_hash",
-                "blockchain_url": "https://rpc-futurenet.stellar.org",
-                "network_passphrase": "Test SDF Future Network ; October 2022",
+                "multiclique_contract_address": "3",
+                "policy_contract_address": "4",
+                "assets_wasm_hash": "some_assets_wasm_hash",
+                "blockchain_url": "some_blockchain_url",
+                "network_passphrase": "some_network_passphrase",
             },
         )
         slack_logger.info.assert_called_once_with(
@@ -495,9 +501,11 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": "a",
                 "votes_contract_address": "b",
-                "assets_wasm_hash": "c",
-                "blockchain_url": "d",
-                "network_passphrase": "e",
+                "multiclique_contract_address": "c",
+                "policy_contract_address": "d",
+                "assets_wasm_hash": "e",
+                "blockchain_url": "f",
+                "network_passphrase": "g",
             },
         ),
         # no input, existing cache
@@ -512,9 +520,11 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": 1,
                 "votes_contract_address": 2,
+                "multiclique_contract_address": "c",
+                "policy_contract_address": "d",
                 "assets_wasm_hash": 3,
                 "blockchain_url": 4,
-                "network_passphrase": "e",
+                "network_passphrase": "g",
             },
         ),
         # input overwrites cache
@@ -532,9 +542,11 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": "a1",
                 "votes_contract_address": "a2",
+                "multiclique_contract_address": "c",
+                "policy_contract_address": "d",
                 "assets_wasm_hash": 3,
                 "blockchain_url": 4,
-                "network_passphrase": "e",
+                "network_passphrase": "g",
             },
         ),
     )
@@ -547,9 +559,11 @@ class SorobanTest(IntegrationTestCase):
         with override_settings(
             CORE_CONTRACT_ADDRESS="a",
             VOTES_CONTRACT_ADDRESS="b",
-            ASSETS_WASM_HASH="c",
-            BLOCKCHAIN_URL="d",
-            NETWORK_PASSPHRASE="e",
+            MULTICLIQUE_CONTRACT_ADDRESS="c",
+            POLICY_CONTRACT_ADDRESS="d",
+            ASSETS_WASM_HASH="e",
+            BLOCKCHAIN_URL="f",
+            NETWORK_PASSPHRASE="g",
         ):
             res = soroban_service.set_config(data=input_data)
 
@@ -568,6 +582,8 @@ class SorobanTest(IntegrationTestCase):
         expected_ids = [
             b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
             b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+            b"2e3b860a87361af06eed8ac7223a4f62a2c3a30eae9036638b3c5af5f2fd6a09",
+            b"aa83046d7034dabb01c97a76e8cb81214042fa61b64bb44ad38bbb4cc17ac061",
             "a1",
             "a2",
         ]
@@ -660,6 +676,8 @@ class SorobanTest(IntegrationTestCase):
                     contractIds=[
                         "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
                         "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+                        "2e3b860a87361af06eed8ac7223a4f62a2c3a30eae9036638b3c5af5f2fd6a09",
+                        "aa83046d7034dabb01c97a76e8cb81214042fa61b64bb44ad38bbb4cc17ac061",
                     ],
                 )
             ],
@@ -787,6 +805,8 @@ class SorobanTest(IntegrationTestCase):
                     contractIds=[
                         "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
                         "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+                        "2e3b860a87361af06eed8ac7223a4f62a2c3a30eae9036638b3c5af5f2fd6a09",
+                        "aa83046d7034dabb01c97a76e8cb81214042fa61b64bb44ad38bbb4cc17ac061",
                     ],
                 )
             ],
@@ -885,14 +905,18 @@ class SorobanTest(IntegrationTestCase):
         expected_config = {
             "core_contract_address": "a",
             "votes_contract_address": "b",
-            "assets_wasm_hash": "some_wasm_hash",
-            "blockchain_url": "https://rpc-futurenet.stellar.org",
-            "network_passphrase": "Test SDF Future Network ; October 2022",
+            "multiclique_contract_address": "c",
+            "policy_contract_address": "d",
+            "assets_wasm_hash": "some_assets_wasm_hash",
+            "blockchain_url": "some_blockchain_url",
+            "network_passphrase": "some_network_passphrase",
         }
         soroban_service.set_config(
             data={
                 "core_contract_address": "a",
                 "votes_contract_address": "b",
+                "multiclique_contract_address": "c",
+                "policy_contract_address": "d",
             }
         )
 

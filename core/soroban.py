@@ -2,19 +2,51 @@ import base64
 import binascii
 import time
 from collections import defaultdict
+from copy import deepcopy
 from functools import wraps
 from json import JSONDecodeError
 from logging import getLogger
-from typing import DefaultDict, Optional, Type
+from typing import Callable, Collection, DefaultDict, List, Optional, Type, Union
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
-from stellar_sdk import Keypair, SorobanServer, StrKey
+from stellar_sdk import (
+    Address,
+    InvokeHostFunction,
+    Keypair,
+    Network,
+    SorobanServer,
+    StrKey,
+    TransactionBuilder,
+    scval,
+)
+from stellar_sdk import xdr as stellar_xdr
 from stellar_sdk.exceptions import SorobanRpcErrorResponse
-from stellar_sdk.soroban_rpc import EventFilter, Request, Response
-from stellar_sdk.soroban_server import V  # noqa
-from stellar_sdk.xdr import SCAddressType, SCVal, SCValType
+from stellar_sdk.soroban_rpc import (
+    EventFilter,
+    GetTransactionStatus,
+    Request,
+    Response,
+    SendTransactionStatus,
+)
+from stellar_sdk.soroban_server import V
+from stellar_sdk.utils import sha256
+from stellar_sdk.xdr import (
+    HostFunction,
+    HostFunctionType,
+    InvokeHostFunctionOp,
+    OperationBody,
+    OperationResultTr,
+    OperationType,
+    SCAddress,
+    SCAddressType,
+    SCSymbol,
+    SCVal,
+    SCValType,
+    SCVec,
+    SorobanAuthorizationEntry,
+)
 
 from core import models as core_models
 from core.event_handler import soroban_event_handler
@@ -23,12 +55,22 @@ logger = getLogger("alerts")
 slack_logger = getLogger("alerts.slack")
 
 
-def unpack_scval(val: SCVal):
+def unpack_sc(val):
+    if isinstance(val, SCVec):
+        return [unpack_sc(_val) for _val in val.sc_vec]
+    elif isinstance(val, SCAddress):
+        if val.type == SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
+            return StrKey.encode_ed25519_public_key(val.account_id.account_id.ed25519.uint256)
+        else:  # SCAddressType.SC_ADDRESS_TYPE_CONTRACT:
+            return StrKey.encode_contract(val.contract_id.hash)
+    elif isinstance(val, SCSymbol):
+        return val.sc_symbol.decode().strip()
+
     match val.type:
         case SCValType.SCV_MAP:
-            return {unpack_scval(entry.key): unpack_scval(entry.val) for entry in val.map.sc_map}
+            return {unpack_sc(entry.key): unpack_sc(entry.val) for entry in val.map.sc_map}
         case SCValType.SCV_VEC:
-            return [unpack_scval(entry) for entry in val.vec.sc_vec]
+            return [unpack_sc(entry) for entry in val.vec.sc_vec]
         case SCValType.SCV_VOID:
             return
         case SCValType.SCV_BOOL:
@@ -57,9 +99,42 @@ def unpack_scval(val: SCVal):
             return val.u128.hi.uint64 << 64 | val.u128.lo.uint64
         case SCValType.SCV_I128:
             return val.i128.hi.int64 << 64 | val.i128.lo.uint64
+        case SCValType.SCV_ERROR:
+            err = val.error
+            return f"type: {err.type.name}: {err.type.value} | code: {err.code.name}: {err.code.value}"
+        case SCValType.SCV_STRING:
+            return val.str.sc_string.decode()
+
+    slack_logger.error(f"Unhandled SC(Val)Type: {str(val)}")
+    return str(val)
+
+
+def unpack_operation_body(body: OperationBody):
+    match body.type:
+        case OperationType.INVOKE_HOST_FUNCTION:
+            return body.invoke_host_function_op
         case _:
-            slack_logger.error(f"Unhandled SCValType: {str(val)}")
-            return str(val)
+            slack_logger.error(f"Unhandled OperationBody: {str(body)}")
+            return str(body)
+
+
+def unpack_host_function(func: HostFunction):
+    match func.type:
+        case HostFunctionType.HOST_FUNCTION_TYPE_INVOKE_CONTRACT:
+            return {
+                "contract_address": unpack_sc(func.invoke_contract.contract_address),
+                "func_name": unpack_sc(func.invoke_contract.function_name),
+                "func_args": [unpack_sc(arg) for arg in func.invoke_contract.args],
+            }
+        case _:
+            slack_logger.error(f"Unhandled HostFunction: {str(func)}")
+            return str(func)
+
+
+def unpack_operation_result_tr(val: OperationResultTr):
+    match val.type:
+        case OperationType.INVOKE_HOST_FUNCTION:
+            return val.invoke_host_function_result.code
 
 
 def retry(description: str):
@@ -143,8 +218,10 @@ class RestartListenerException(Exception):
 
 class SorobanException(Exception):
     msg = None
+    ctx = None
 
-    def __init__(self, *_, **__):
+    def __init__(self, *_, ctx=None):
+        self.ctx = ctx
         super().__init__(self.msg)
 
 
@@ -154,6 +231,10 @@ class OutOfSyncException(SorobanException):
 
 class NoLongerAvailableException(SorobanException):
     msg = "The requested ledger is no longer available."
+
+
+class InvalidXDRException(SorobanException):
+    msg = "The XDR is invalid."
 
 
 class RobustSorobanServer(SorobanServer):
@@ -178,13 +259,226 @@ class RobustSorobanServer(SorobanServer):
 
 class SorobanService(object):
     soroban: RobustSorobanServer = None
+    network_passphrase: str = None
+    wait_for_txn_interval: int = 1  # seconds
 
     @retry("initializing blockchain connection")
     def __init__(self):
-        self.soroban = RobustSorobanServer(server_url=self.set_config()["blockchain_url"])
+        config = self.set_config()
+        self.soroban = RobustSorobanServer(server_url=config["blockchain_url"])
+        self.network_passphrase = config["network_passphrase"]
+        self.multiclique_addr = config["multiclique_contract_address"]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
+
+    # todo replace w/ sdk version, once fixed
+    @staticmethod
+    def authorize_entry(
+        entry: Union[stellar_xdr.SorobanAuthorizationEntry, str],
+        signers: List[(Union[Keypair, Callable[[stellar_xdr.HashIDPreimage], bytes]])],
+        valid_until_ledger_sequence: int,
+        network_passphrase: str,
+    ) -> stellar_xdr.SorobanAuthorizationEntry:
+        """Actually authorizes an existing authorization entry using the given the
+        credentials and expiration details, returning a signed copy.
+
+        This "fills out" the authorization entry with a signature, indicating to the
+        :class:`stellar_sdk.InvokeHostFunction` it's attached to that:
+
+        * a particular identity (i.e. signing :class:`stellar_sdk.Keypair` or other signer)
+        * approving the execution of an invocation tree (i.e. a
+            simulation-acquired :class:`stellar_xdr.SorobanAuthorizedInvocation` or otherwise built)
+        * on a particular network (uniquely identified by its passphrase, see :class:`stellar_sdk.Network`)
+        * until a particular ledger sequence is reached.
+
+        :param entry: an unsigned Soroban authorization entry.
+        :param signers: list of either a :class:`Keypair` or a function which takes a payload
+            (a :class:`stellar_xdr.HashIDPreimage` instance) input and returns a bytes signature,
+            the signing key should correspond to the address in the `entry`.
+        :param valid_until_ledger_sequence: the (exclusive) future ledger sequence number until which
+            this authorization entry should be valid (if `currentLedgerSeq==validUntil`, this is expired)
+        :param network_passphrase: the network passphrase is incorporated into the signature
+            (see :class:`stellar_sdk.Network` for options)
+        :return: a signed Soroban authorization entry.
+        """
+
+        if isinstance(entry, str):
+            entry = stellar_xdr.SorobanAuthorizationEntry.from_xdr(entry)
+        else:
+            entry = deepcopy(entry)
+
+        if entry.credentials.type != stellar_xdr.SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS:
+            return entry
+
+        assert entry.credentials.address is not None
+        addr_auth = entry.credentials.address
+        addr_auth.signature_expiration_ledger = stellar_xdr.Uint32(valid_until_ledger_sequence)
+
+        network_id = Network(network_passphrase).network_id()
+        preimage = stellar_xdr.HashIDPreimage(
+            type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
+            soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
+                network_id=stellar_xdr.Hash(network_id),
+                nonce=addr_auth.nonce,
+                signature_expiration_ledger=addr_auth.signature_expiration_ledger,
+                invocation=entry.root_invocation,
+            ),
+        )
+        payload = sha256(preimage.to_xdr_bytes())
+        signatures = []
+
+        for signer in signers:
+            if isinstance(signer, Keypair):
+                signature = signer.sign(payload)
+            else:
+                signature = signer(preimage)
+            public_key = Address.from_raw_account(signer.raw_public_key()).key
+            signatures.append(
+                scval.to_map(
+                    {
+                        scval.to_symbol("public_key"): scval.to_bytes(public_key),
+                        scval.to_symbol("signature"): scval.to_bytes(signature),
+                    }
+                )
+            )
+
+        addr_auth.signature = scval.to_vec(signatures)
+        return entry
+
+    def create_preimage_hash(self, entry: SorobanAuthorizationEntry) -> str:
+        """
+        Args:
+            entry: auth entry to generate preimage hash from
+
+        Returns:
+            preimage hash as b64 encoded str
+        """
+        addr_auth = entry.credentials.address
+        # todo not sure if we need a different expiration ledger
+        # addr_auth.signature_expiration_ledger = stellar_xdr.Uint32(?)
+
+        network_id = Network(self.network_passphrase).network_id()
+        preimage = stellar_xdr.HashIDPreimage(
+            type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
+            soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
+                network_id=stellar_xdr.Hash(network_id),
+                nonce=addr_auth.nonce,
+                signature_expiration_ledger=addr_auth.signature_expiration_ledger,
+                invocation=entry.root_invocation,
+            ),
+        )
+        return base64.b64encode(sha256(preimage.to_xdr_bytes())).decode()
+
+    def analyze_xdr(self, xdr: str):
+        # todo improve: signatures? handle exceptions. move to unpack_operation_body?
+        try:
+            envelope = stellar_xdr.TransactionEnvelope.from_xdr(xdr=xdr)
+        except binascii.Error as err:
+            raise InvalidXDRException(ctx={"xdr": xdr, "error": str(err)})
+
+        source_acc = StrKey.encode_ed25519_public_key(envelope.v1.tx.source_account.ed25519.uint256)
+        if isinstance(op := unpack_operation_body(envelope.v1.tx.operations[0].body), InvokeHostFunctionOp):
+            signers = []
+            for entry in op.auth:
+                sigs: dict | list[dict] = unpack_sc(entry.credentials.address.signature)
+                if isinstance(sigs, Collection):
+                    signers.extend([sig["public_key"] for sig in sigs])
+                # todo check if that can happen
+                else:
+                    signers.append(sigs["public_key"])
+            func_call = unpack_host_function(op.host_function)
+            return {
+                "source_acc": source_acc,
+                "contract_address": func_call["contract_address"],
+                "func_name": func_call["func_name"],
+                "func_args": func_call["func_args"],
+                "signers": signers,
+                "preimage_hash": self.create_preimage_hash(entry=op.auth[0]),
+            }
+
+    def invoke_contract_func(
+        self,
+        func_name: str,
+        func_args: list,
+        signers: [Keypair],
+        contract_addr: str = None,
+        base_fee=100,
+        timeout=300,
+    ):
+        if contract_addr is None:
+            contract_addr = self.multiclique_addr
+
+        metadata = {
+            "contract_addr": contract_addr,
+            "func_name": func_name,
+            "func_args": [unpack_sc(arg) for arg in func_args],
+        }
+        envelope = (
+            TransactionBuilder(
+                source_account=self.soroban.load_account(signers[0].public_key),
+                network_passphrase=self.network_passphrase,
+                base_fee=base_fee,
+            )
+            .set_timeout(timeout)
+            .append_invoke_contract_function_op(
+                contract_id=contract_addr,
+                function_name=func_name,
+                parameters=func_args,
+            )
+            .build()
+        )
+        sim_txn = self.soroban.simulate_transaction(envelope)
+        # todo fix this
+        assert isinstance(envelope.transaction.operations[0], InvokeHostFunction)
+        assert sim_txn.results is not None
+
+        if _auth := sim_txn.results[0].auth:
+            envelope.transaction.operations[0].auth = [
+                self.authorize_entry(
+                    entry=_auth[0],
+                    signers=signers,
+                    valid_until_ledger_sequence=sim_txn.latest_ledger + 20,
+                    network_passphrase=self.network_passphrase,
+                )
+            ]
+        envelope = self.soroban.prepare_transaction(
+            transaction_envelope=envelope, simulate_transaction_response=sim_txn
+        )
+        envelope.transaction.fee *= 2
+        envelope.transaction.soroban_data.resources.instructions.uint32 *= 2
+        envelope.sign(signers[0])
+
+        send_txn_res = self.soroban.send_transaction(envelope)
+        if send_txn_res.status != SendTransactionStatus.PENDING:
+            err = stellar_xdr.TransactionResult.from_xdr(send_txn_res.error_result_xdr).result.code.name
+            raise SorobanException(f"send_transaction failed: {err}", ctx=metadata)
+
+        while (get_txn_res := self.soroban.get_transaction(send_txn_res.hash)).status == GetTransactionStatus.NOT_FOUND:
+            time.sleep(self.wait_for_txn_interval)
+
+        if get_txn_res.status == GetTransactionStatus.FAILED:
+            result_xdr = stellar_xdr.TransactionResult.from_xdr(get_txn_res.result_xdr)
+            meta_xdr = stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr)
+            errs = [unpack_operation_result_tr(result.tr).name for result in result_xdr.result.results]
+            diagnostic_events = []
+            for event in meta_xdr.v3.soroban_meta.diagnostic_events:
+                _event = event.event
+                body = getattr(_event.body, f"v{_event.body.v}")
+                diagnostic_events.append(
+                    {
+                        "contract_id": _event.contract_id and StrKey.encode_contract(_event.contract_id.hash),
+                        "type": _event.type.name,
+                        "in_successful_contract_call": event.in_successful_contract_call,
+                        "topics": unpack_sc(body.topics),
+                        "data": unpack_sc(body.data),
+                    }
+                )
+            raise SorobanException(
+                f"transaction failed: {errs}", ctx={"diagnostic_events": diagnostic_events, **metadata}
+            )
+
+        return unpack_sc(stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value)
 
     @staticmethod
     def verify(address: str, challenge_address: str, signature: str) -> bool:
@@ -263,6 +557,8 @@ class SorobanService(object):
         data = {
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
+            "multiclique_contract_address": settings.MULTICLIQUE_CONTRACT_ADDRESS,
+            "policy_contract_address": settings.POLICY_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
             "blockchain_url": settings.BLOCKCHAIN_URL,
             "network_passphrase": settings.NETWORK_PASSPHRASE,
@@ -277,15 +573,26 @@ class SorobanService(object):
         sets "trusted_contract_ids" to
             cache["config"]["core_contract_address"],
             cache["config"]["votes_contract_address"],
+            cache["config"]["multiclique_contract_address"],
+            cache["config"]["policy_contract_address"],
             all Asset IDs
 
         Returns:
             list of trusted contract IDs
         """
         config = self.set_config()
+
         trusted_contract_ids = [
-            binascii.hexlify(StrKey.decode_contract(config["core_contract_address"])),
-            binascii.hexlify(StrKey.decode_contract(config["votes_contract_address"])),
+            *[
+                binascii.hexlify(StrKey.decode_contract(config[addr]))
+                for addr in (
+                    "core_contract_address",
+                    "votes_contract_address",
+                    "multiclique_contract_address",
+                    "policy_contract_address",
+                )
+                if config[addr]
+            ],
             *core_models.Asset.objects.values_list("id", flat=True),
         ]
         cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
@@ -374,8 +681,8 @@ class SorobanService(object):
                     (
                         event.contract_id,
                         event.id,
-                        [unpack_scval(SCVal.from_xdr(topic)) for topic in event.topic],
-                        unpack_scval(SCVal.from_xdr(event.value.xdr)),
+                        [unpack_sc(SCVal.from_xdr(topic)) for topic in event.topic],
+                        unpack_sc(SCVal.from_xdr(event.value.xdr)),
                     )
                 )
 
@@ -394,7 +701,7 @@ class SorobanService(object):
             if cache.get("restart_listener"):
                 logger.info("Restarting listener...")
                 self.soroban.close()
-                self.soroban = retry("reinitializing blockchain connection")(RobustSorobanServer)(
+                self.soroban = retry("reinitializing blockchain connection")(SorobanServer)(
                     server_url=self.set_config()["blockchain_url"]
                 )
                 cache.delete("restart_listener")
