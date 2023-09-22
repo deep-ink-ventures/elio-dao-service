@@ -81,8 +81,8 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
         return self.queryset.select_related("policy")
 
     @swagger_auto_schema(
-        operation_id="Create / Update MultiCliqueAccount Account",
-        operation_description="Creates or updates a MultiCliqueAccount Account",
+        operation_id="Create / Update MultiCliqueAccount",
+        operation_description="Creates or updates a MultiCliqueAccount",
         request_body=serializers.MultiCliqueAccountSerializer,
         responses={
             200: openapi.Response("", serializers.MultiCliqueAccountSerializer),
@@ -127,6 +127,15 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Upda
     def get_queryset(self):
         return self.queryset.select_related("multiclique_account")
 
+    @swagger_auto_schema(
+        operation_id="Create MultiCliqueTransaction",
+        operation_description="Creates a MultiCliqueTransaction",
+        request_body=serializers.CreateMultiCliqueTransactionSerializer,
+        responses={
+            201: openapi.Response("", serializers.MultiCliqueTransactionSerializer),
+        },
+        security=[{"Basic": []}],
+    )
     def create(self, request, *args, **kwargs):
         from core.soroban import soroban_service
 
