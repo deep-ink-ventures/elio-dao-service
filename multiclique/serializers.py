@@ -62,6 +62,10 @@ class MultiCliqueTransactionSerializer(ModelSerializer):
         )
 
 
+class SwaggerMultiCliqueAuthSerializer(Serializer):
+    signature = CharField()
+
+
 class MultiCliqueAuthSerializer(Serializer):
     address = CharField(write_only=True)
     signature = CharField(write_only=True)

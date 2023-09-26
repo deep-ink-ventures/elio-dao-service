@@ -150,7 +150,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
         method="POST",
         operation_id="Create JWT Token",
         operation_description="Creates a JWT Token for the given MultiClique Account.",
-        request_body=serializers.MultiCliqueAuthSerializer,
+        request_body=serializers.SwaggerMultiCliqueAuthSerializer,
         responses=openapi.Responses(responses={HTTP_200_OK: openapi.Response("", serializers.JWTTokenSerializer)}),
         security=[{"Basic": []}],
     )
