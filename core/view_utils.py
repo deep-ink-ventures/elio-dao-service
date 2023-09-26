@@ -3,9 +3,10 @@ from itertools import chain
 from types import FunctionType
 from typing import Optional
 
-from django.core.exceptions import FieldError
 from django.db.models import QuerySet
 from drf_yasg import openapi
+from rest_framework.exceptions import ValidationError
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.permissions import BasePermission
@@ -62,46 +63,6 @@ class IsTokenHolder(BasePermission):
                 "owner_id", flat=True
             )
         )
-
-
-class FilterBackend:
-    order_kw = "order_by"
-    ignored_filter_fields = ("limit", "offset", order_kw)
-    always_accept = ("id", "pk")
-    order_separator = ","
-
-    def filter_queryset(self, request, queryset, view):
-        filters = {}
-        allowed_filter_fields = getattr(view, "allowed_filter_fields", ())
-        allowed_order_fields = getattr(view, "allowed_order_fields", ())
-        for field, value in request.query_params.items():
-            if field in self.ignored_filter_fields:
-                continue
-            if field in self.always_accept:
-                filters[field] = value
-                continue
-            if field not in allowed_filter_fields:
-                raise FieldError(
-                    f"'{field}' is an invalid filter field. Choices are:"
-                    f" {', '.join(chain(self.always_accept, allowed_filter_fields))}"
-                )
-            filters[field] = value
-
-        qs = queryset.filter(**filters)
-        if order_by_fields := request.query_params.get(self.order_kw):
-            order_by_fields = order_by_fields.split(self.order_separator)
-            for order_field in order_by_fields:
-                # allow for leading "-" / reverse ordering
-                order_field = order_field[1:] if order_field.startswith("-") else order_field
-                if order_field in self.always_accept:
-                    continue
-                if order_field not in allowed_order_fields:
-                    raise FieldError(
-                        f"'{order_field}' is an invalid order field. Choices are:"
-                        f" {', '.join(chain(self.always_accept, allowed_order_fields))}"
-                    )
-            qs = qs.order_by(*order_by_fields)
-        return qs
 
 
 class MultiQsLimitOffsetPagination(LimitOffsetPagination):
@@ -186,10 +147,34 @@ signed_by_token_holder = openapi.Parameter(
 )
 
 
+class QueryFilter:
+    always_accept = ["pk"]
+    ignored_filter_fields = ["limit", "offset", "ordering", "search"]
+
+    def filter_queryset(self, request, queryset, view):
+        filters = {}
+        filter_fields = getattr(view, "filter_fields", ())
+        for field, value in request.query_params.items():
+            if field in self.ignored_filter_fields:
+                continue
+            if field in self.always_accept:
+                filters[field] = value
+                continue
+            if field not in filter_fields:
+                raise ValidationError(
+                    f"'{field}' is an invalid filter field. Choices are:"
+                    f" {', '.join(chain(self.always_accept, filter_fields))}"
+                )
+            filters[field] = value
+
+        return queryset.filter(**filters)
+
+
 class SearchableMixin(GenericViewSet):
-    allowed_order_fields = ()
-    allowed_filter_fields = ()
-    filter_backends = [FilterBackend]
+    filter_fields = []
+    search_fields = []
+    ordering_fields = []
+    filter_backends = [SearchFilter, OrderingFilter, QueryFilter]
 
     @staticmethod
     def _copy_func(f):
@@ -228,21 +213,34 @@ class SearchableMixin(GenericViewSet):
             overrides = getattr(list_fn, "_swagger_auto_schema", {})
             manual_parameters = overrides.pop("manual_parameters", [])
 
-            if self.allowed_order_fields:
+            if self.ordering_fields:
                 manual_parameters.append(
                     swagger_query_param(
                         **{
-                            "name": "order_by",
+                            "name": "ordering",
                             "description": "Comma separated list of parameters to order the results by.\n"
                             '"-" reverses the order.',
                             "type": openapi.TYPE_STRING,
                             "required": False,
                             "example": "-id,some_field",
-                            "enum": self.allowed_order_fields,
+                            "enum": self.ordering_fields,
                         }
                     )
                 )
-            if self.allowed_filter_fields:
+            if self.search_fields:
+                manual_parameters.append(
+                    swagger_query_param(
+                        **{
+                            "name": "search",
+                            "description": f"Search for results in these fields: {','.join(self.search_fields)}",
+                            "type": openapi.TYPE_STRING,
+                            "required": False,
+                            "example": "some_value",
+                        }
+                    )
+                )
+
+            if self.filter_fields:
                 manual_parameters.extend(
                     [
                         swagger_query_param(
@@ -254,7 +252,7 @@ class SearchableMixin(GenericViewSet):
                                 "example": "some_value",
                             }
                         )
-                        for filter_field in self.allowed_filter_fields
+                        for filter_field in self.filter_fields
                     ]
                 )
 

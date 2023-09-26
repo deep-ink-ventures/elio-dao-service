@@ -1,66 +1,48 @@
 from unittest.mock import Mock
 
 from ddt import data, ddt
-from django.core.exceptions import FieldError
 from django.db import connection, models
+from rest_framework.exceptions import ValidationError
 
 from core.tests.testcases import IntegrationTestCase, UnitTestCase
-from core.view_utils import FilterBackend, MultiQsLimitOffsetPagination, SearchableMixin
+from core.view_utils import MultiQsLimitOffsetPagination, QueryFilter, SearchableMixin
 
 
 @ddt
-class FilterBackendTest(UnitTestCase):
+class QueryFilterTest(UnitTestCase):
     def setUp(self) -> None:
-        self.filter_backend = FilterBackend()
+        self.filter_backend = QueryFilter()
 
     @data(
-        # query_params, allowed_filter_fields, allowed_order_fields, expected err msg
+        # query_params, filter_fields, expected err msg
         # no allowed filter fields
-        ({"a": 1}, (), (), "'a' is an invalid filter field. Choices are: id, pk"),
+        ({"a": 1}, (), "'a' is an invalid filter field. Choices are: pk"),
         # not in allowed filter fields
-        ({"a": 1, "b": 1}, ("a",), (), "'b' is an invalid filter field. Choices are: id, pk"),
-        ({"a": 1, "b": 1}, ("a",), ("a", "b"), "'b' is an invalid filter field. Choices are: id, pk"),
-        # no allowed order fields
-        ({"order_by": "a"}, (), (), "'a' is an invalid order field. Choices are: id, pk"),
-        # not in allowed order fields
-        ({"order_by": "a,b"}, (), ("a",), "'b' is an invalid order field. Choices are: id, pk, a"),
-        ({"order_by": "a,b"}, ("a", "b"), ("a",), "'b' is an invalid order field. Choices are: id, pk, a"),
+        ({"a": 1, "b": 1}, ("a",), "'b' is an invalid filter field. Choices are: pk, a"),
         # happy paths
-        ({"id": 1}, (), (), None),
-        ({"pk": 1}, (), (), None),
-        ({"a": 1}, ("a",), (), None),
-        ({"a": 1}, ("a", "b"), ("a", "b"), None),
-        ({"a": 1, "b": 2}, ("a", "b"), (), None),
-        ({"order_by": "id"}, (), (), None),
-        ({"order_by": "pk"}, (), (), None),
-        ({"order_by": "a"}, (), ("a",), None),
-        ({"order_by": "a,b"}, (), ("a", "b"), None),
-        ({"a": 1, "order_by": "b"}, ("a",), ("b",), None),
-        ({"a": 1, "b": 2, "order_by": "c,d,-f,-id"}, ("a", "b"), ("c", "d", "f"), None),
+        ({}, (), None),
+        ({"pk": 1}, (), None),
+        ({"pk": 1}, (), None),
+        ({"a": 1}, ("a",), None),
+        ({"a": 1}, ("a", "b"), None),
+        ({"a": 1, "b": 2}, ("a", "b"), None),
     )
     def test_filter_queryset(self, case):
-        query_params, allowed_filter_fields, allowed_order_fields, expected_err_msg = case
+        query_params, filter_fields, expected_err_msg = case
         request = Mock(query_params=query_params)
         qs = Mock()
-        view = Mock(allowed_filter_fields=allowed_filter_fields, allowed_order_fields=allowed_order_fields)
+        view = Mock(filter_fields=filter_fields)
 
         if expected_err_msg:
-            with self.assertRaisesMessage(FieldError, expected_err_msg):
+            with self.assertRaisesMessage(ValidationError, expected_err_msg):
                 self.assertIsNone(self.filter_backend.filter_queryset(request=request, queryset=qs, view=view))
         else:
-            res = self.filter_backend.filter_queryset(request=request, queryset=qs, view=view)
-            order_by = query_params.pop("order_by", [])
+            self.filter_backend.filter_queryset(request=request, queryset=qs, view=view)
 
             if query_params:
                 qs.filter.assert_called_once_with(**query_params)
-                if not order_by:
-                    self.assertEqual(res, qs.filter())
             else:
                 qs.filter.assert_called_once_with()
-
-            if order_by:
-                qs.filter().order_by.assert_called_once_with(*order_by.split(","))
-                self.assertEqual(res, qs.filter().order_by())
 
 
 class TestModel(models.Model):

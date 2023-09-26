@@ -135,8 +135,8 @@ def update_config(request, *args, **kwargs):
 
 @method_decorator(swagger_auto_schema(operation_description="Retrieves an Account."), "retrieve")
 class AccountViewSet(ReadOnlyModelViewSet, SearchableMixin):
-    allowed_filter_fields = ("id",)
-    allowed_order_fields = ("id",)
+    filter_fields = ("id",)
+    ordering_fields = ("id",)
     queryset = models.Account.objects.all()
 
     def get_serializer_class(self):
@@ -151,8 +151,8 @@ class AccountViewSet(ReadOnlyModelViewSet, SearchableMixin):
 
 class DaoViewSet(ReadOnlyModelViewSet, SearchableMixin):
     queryset = models.Dao.objects.all()
-    allowed_filter_fields = ("id", "name", "creator_id", "owner_id")
-    allowed_order_fields = ("id", "name", "creator_id", "owner_id")
+    filter_fields = ("id", "name", "creator_id", "owner_id")
+    ordering_fields = ("id", "name", "creator_id", "owner_id")
     pagination_class = MultiQsLimitOffsetPagination
 
     def get_queryset(self):
@@ -264,16 +264,16 @@ class DaoViewSet(ReadOnlyModelViewSet, SearchableMixin):
 
 @method_decorator(swagger_auto_schema(operation_description="Retrieves an Asset."), "retrieve")
 class AssetViewSet(ReadOnlyModelViewSet, SearchableMixin):
-    allowed_filter_fields = ("id", "owner_id", "dao_id")
-    allowed_order_fields = ("id", "owner_id", "dao_id")
+    filter_fields = ("id", "owner_id", "dao_id")
+    ordering_fields = ("id", "owner_id", "dao_id")
     queryset = models.Asset.objects.all()
     serializer_class = serializers.AssetSerializer
 
 
 @method_decorator(swagger_auto_schema(operation_description="Retrieves an Asset Holding."), "retrieve")
 class AssetHoldingViewSet(ReadOnlyModelViewSet, SearchableMixin):
-    allowed_filter_fields = ("id", "owner_id", "asset_id")
-    allowed_order_fields = ("id", "owner_id", "asset_id")
+    filter_fields = ("id", "owner_id", "asset_id")
+    ordering_fields = ("id", "owner_id", "asset_id")
     queryset = models.AssetHolding.objects.all()
     serializer_class = serializers.AssetHoldingSerializer
 
@@ -281,8 +281,8 @@ class AssetHoldingViewSet(ReadOnlyModelViewSet, SearchableMixin):
 class ProposalViewSet(ReadOnlyModelViewSet, SearchableMixin):
     queryset = models.Proposal.objects.all()
     serializer_class = serializers.ProposalSerializer
-    allowed_filter_fields = ("id", "dao_id")
-    allowed_order_fields = ("id", "dao_id")
+    filter_fields = ("id", "dao_id")
+    ordering_fields = ("id", "dao_id")
 
     def get_queryset(self):
         return self.queryset.prefetch_related("votes")

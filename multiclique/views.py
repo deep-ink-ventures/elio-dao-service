@@ -14,7 +14,6 @@ from rest_framework.viewsets import ReadOnlyModelViewSet
 from stellar_sdk import TransactionBuilder
 from stellar_sdk.exceptions import PrepareTransactionException
 
-from core.soroban import InvalidXDRException
 from core.view_utils import MultiQsLimitOffsetPagination, SearchableMixin
 from multiclique import models, serializers
 from multiclique.serializers import InstallAccountAndPolicySerializer
@@ -73,7 +72,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
     queryset = models.MultiCliqueAccount.objects.all()
     pagination_class = MultiQsLimitOffsetPagination
     serializer_class = serializers.MultiCliqueAccountSerializer
-    search_fields = ["address", "public_keys"]
+    search_fields = ["address", "signatories"]
     ordering_fields = ["address"]
     lookup_field = "address"
 
@@ -96,15 +95,20 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
             serializer.is_valid(raise_exception=True)
         except ValidationError as err:
             # we ignore unique address error, since we want to update these accounts if they exist already
-            if not (addr_err := err.detail.get("address")) or addr_err[0].code != "unique":
+            if addr_err := err.detail.get("address"):
+                if addr_err[0].code == "unique":
+                    err.detail.pop("address")
+            if err.detail:
                 raise
+
         data = serializer.data
         # to UPPER_SNAKE_CASE
         policy_name = re.sub(r"_+", "_", re.sub(r"[\s|\-|\.]+", "_", data["policy"].upper()))  # noqa
         multiclique_acc, created = models.MultiCliqueAccount.objects.update_or_create(
             address=data["address"],
             defaults={
-                "public_keys": data["public_keys"],
+                "name": data["name"],
+                "signatories": data["signatories"],
                 "default_threshold": data["default_threshold"],
                 "policy": models.MultiCliquePolicy.objects.get_or_create(name=policy_name)[0],
             },
@@ -122,7 +126,6 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Upda
     serializer_class = serializers.MultiCliqueTransactionSerializer
     filter_fields = ["xdr", "multiclique_account__address"]
     ordering_fields = ["call_func", "status", "executed_at"]
-    lookup_field = "xdr"
 
     def get_queryset(self):
         return self.queryset.select_related("multiclique_account")
@@ -137,7 +140,7 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Upda
         security=[{"Basic": []}],
     )
     def create(self, request, *args, **kwargs):
-        from core.soroban import soroban_service
+        from core.soroban import InvalidXDRException, soroban_service
 
         serializer = serializers.CreateMultiCliqueTransactionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)

@@ -14,14 +14,14 @@ from multiclique import models
 class MultiCliqueViewSetTest(IntegrationTestCase):
     def setUp(self):
         super().setUp()
-        self.public_keys = ["pk1", "pk2", "pk3", "pk4"]
+        self.signatories = ["pk1", "pk2", "pk3", "pk4"]
         self.pol1 = models.MultiCliquePolicy.objects.create(name="POL1", active=True)
         self.pol2 = models.MultiCliquePolicy.objects.create(name="POL2", active=False)
         self.mc1 = models.MultiCliqueAccount.objects.create(
-            address="addr1", policy=self.pol1, public_keys=self.public_keys, default_threshold=2
+            address="addr1", name="acc1", policy=self.pol1, signatories=self.signatories, default_threshold=2
         )
         self.mc2 = models.MultiCliqueAccount.objects.create(
-            address="addr2", policy=self.pol2, public_keys=self.public_keys[1:3], default_threshold=2
+            address="addr2", name="acc2", policy=self.pol2, signatories=self.signatories[1:3], default_threshold=2
         )
         self.txn1 = models.MultiCliqueTransaction.objects.create(
             multiclique_account=self.mc1,
@@ -55,14 +55,15 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     def test_multiclique_account_get(self):
         expected_res = {
             "address": "addr1",
+            "name": "acc1",
             "policy": "POL1",
-            "public_keys": self.public_keys,
+            "signatories": self.signatories,
             "default_threshold": 2,
         }
         with self.assertNumQueries(1):
             res = self.client.get(reverse("multiclique-accounts-detail", kwargs={"address": "addr1"}))
 
-        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
     def test_multiclique_account_list(self):
@@ -70,29 +71,32 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             [
                 {
                     "address": "addr1",
+                    "name": "acc1",
                     "policy": "POL1",
-                    "public_keys": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
                     "default_threshold": 2,
                 },
                 {
                     "address": "addr2",
+                    "name": "acc2",
                     "policy": "POL2",
-                    "public_keys": ["pk2", "pk3"],
+                    "signatories": ["pk2", "pk3"],
                     "default_threshold": 2,
                 },
             ]
         )
         with self.assertNumQueries(2):
-            res = self.client.get(reverse("multiclique-accounts-list"))
+            res = self.client.get(reverse("multiclique-accounts-list"), {"ordering": "address"})
 
-        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
     def test_multiclique_account_create(self):
         expected_res = {
             "address": "addr3",
+            "name": "acc1",
             "policy": "POL_3",
-            "public_keys": self.public_keys,
+            "signatories": self.signatories,
             "default_threshold": 3,
         }
         with self.assertNumQueries(11):
@@ -100,14 +104,15 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr3",
+                    "name": "acc1",
                     "policy": "pOl_ 3",
-                    "public_keys": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
             )
 
-        self.assertEqual(res.status_code, HTTP_201_CREATED)
+        self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
         self.assertDictEqual(res.json(), expected_res)
         self.assertModelsEqual(
             models.MultiCliqueAccount.objects.order_by("address"),
@@ -123,15 +128,17 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     def test_multiclique_account_create_existing_account(self):
         expected_res = {
             "address": "addr3",
+            "name": "acc1",
             "policy": "POL_3",
-            "public_keys": self.public_keys,
+            "signatories": self.signatories,
             "default_threshold": 3,
         }
         models.MultiCliqueAccount.objects.create(
             **{
                 "address": "addr3",
+                "name": "acc2",
                 "policy": self.pol1,
-                "public_keys": self.public_keys,
+                "signatories": self.signatories,
                 "default_threshold": 2,
             }
         )
@@ -140,14 +147,15 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr3",
+                    "name": "acc1",
                     "policy": "pOl_ 3",
-                    "public_keys": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
             )
 
-        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
         self.assertModelsEqual(
             models.MultiCliqueAccount.objects.order_by("address"),
@@ -157,8 +165,9 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 models.MultiCliqueAccount(
                     **{
                         "address": "addr3",
+                        "name": "acc1",
                         "policy": models.MultiCliquePolicy.objects.get(name="POL_3"),
-                        "public_keys": self.public_keys,
+                        "signatories": self.signatories,
                         "default_threshold": 3,
                     }
                 ),
@@ -168,8 +177,9 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     def test_multiclique_account_create_existing_policy(self):
         expected_res = {
             "address": "addr2",
+            "name": "acc1",
             "policy": "POL2",
-            "public_keys": self.public_keys,
+            "signatories": self.signatories,
             "default_threshold": 3,
         }
         with self.assertNumQueries(6):
@@ -177,14 +187,34 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr2",
+                    "name": "acc1",
                     "policy": "POL2",
-                    "public_keys": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
             )
 
-        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), expected_res)
+
+    def test_multiclique_account_invalid(self):
+        expected_res = {
+            "name": ["This field is required."],
+        }
+        with self.assertNumQueries(1):
+            res = self.client.post(
+                reverse("multiclique-accounts-list"),
+                data={
+                    "address": "addr2",
+                    "policy": "POL2",
+                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
+                    "default_threshold": 3,
+                },
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
     def test_multiclique_transaction_get(self):
@@ -201,14 +231,14 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "updated_at": self.fmt_dt(self.txn1.updated_at),
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
-            "public_keys": self.mc1.public_keys,
+            "signatories": self.mc1.signatories,
         }
         with self.assertNumQueries(1):
             res = self.client.get(
-                reverse("multiclique-transactions-detail", kwargs={"xdr": "xdr1"}),
+                reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
             )
 
-        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
     def test_multiclique_transaction_list(self):
@@ -227,7 +257,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "updated_at": self.fmt_dt(self.txn1.updated_at),
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
-                    "public_keys": self.mc1.public_keys,
+                    "signatories": self.mc1.signatories,
                 },
                 {
                     "xdr": self.txn2.xdr,
@@ -242,7 +272,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "updated_at": self.fmt_dt(self.txn2.updated_at),
                     "multiclique_address": self.mc2.address,
                     "default_threshold": self.mc2.default_threshold,
-                    "public_keys": self.mc2.public_keys,
+                    "signatories": self.mc2.signatories,
                 },
             ]
         )
@@ -251,7 +281,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 reverse("multiclique-transactions-list"),
             )
 
-        self.assertEqual(res.status_code, HTTP_200_OK)
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
     @patch("core.soroban.soroban_service.analyze_xdr")
@@ -275,7 +305,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "executed_at": None,
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
-            "public_keys": self.mc1.public_keys,
+            "signatories": self.mc1.signatories,
         }
 
         with self.assertNumQueries(2):

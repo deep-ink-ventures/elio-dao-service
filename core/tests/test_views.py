@@ -279,7 +279,7 @@ class CoreViewSetTest(IntegrationTestCase):
 
     @data(
         # query_params
-        {"id": "dao2"},
+        {"pk": "dao2"},
         {"owner_id": "acc2"},
         {"name": "dao2 name"},
     )
@@ -294,7 +294,7 @@ class CoreViewSetTest(IntegrationTestCase):
     @data(
         # query_params, expected_res
         (
-            {"order_by": "id"},
+            {"ordering": "id"},
             [
                 expected_dao1_res,
                 expected_dao2_res,
@@ -317,7 +317,7 @@ class CoreViewSetTest(IntegrationTestCase):
             ],
         ),
         (
-            {"order_by": "name"},
+            {"ordering": "name"},
             [
                 {
                     "id": "dao3",
@@ -340,7 +340,7 @@ class CoreViewSetTest(IntegrationTestCase):
             ],
         ),
         (
-            {"order_by": "owner_id,id"},
+            {"ordering": "owner_id,id"},
             [
                 expected_dao1_res,
                 expected_dao2_res,
@@ -363,7 +363,7 @@ class CoreViewSetTest(IntegrationTestCase):
             ],
         ),
     )
-    def test_dao_list_order_by(self, case):
+    def test_dao_list_ordering(self, case):
         query_params, expected_res = case
         models.Dao.objects.create(
             id="dao3", contract_id="contract3", name="3", creator_id="acc1", owner_id="acc2", setup_complete=True
@@ -379,7 +379,7 @@ class CoreViewSetTest(IntegrationTestCase):
     @data(
         # query_params, expected_res, expected query count
         (
-            {"prioritise_owner": "acc2", "order_by": "-name"},
+            {"prioritise_owner": "acc2", "ordering": "-name"},
             [
                 {
                     "id": "dao4",
@@ -419,7 +419,7 @@ class CoreViewSetTest(IntegrationTestCase):
             4,
         ),
         (
-            {"prioritise_holder": "acc3", "order_by": "-name"},
+            {"prioritise_holder": "acc3", "ordering": "-name"},
             [
                 {
                     "id": "dao4",
@@ -459,7 +459,7 @@ class CoreViewSetTest(IntegrationTestCase):
             4,
         ),
         (
-            {"prioritise_owner": "acc2", "prioritise_holder": "acc3", "order_by": "name"},
+            {"prioritise_owner": "acc2", "prioritise_holder": "acc3", "ordering": "name"},
             [
                 expected_dao2_res,
                 {

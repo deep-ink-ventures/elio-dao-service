@@ -21,7 +21,7 @@ class MultiCliqueAccountSerializer(ModelSerializer):
 
     class Meta:
         model = models.MultiCliqueAccount
-        fields = ("address", "public_keys", "default_threshold", "policy")
+        fields = ("address", "name", "signatories", "default_threshold", "policy")
 
 
 class CreateMultiCliqueTransactionSerializer(Serializer):
@@ -38,7 +38,7 @@ class CreateMultiCliqueTransactionSerializer(Serializer):
 class MultiCliqueTransactionSerializer(ModelSerializer):
     multiclique_address = CharField(source="multiclique_account.address")
     default_threshold = IntegerField(source="multiclique_account.default_threshold")
-    public_keys = ListField(child=CharField(required=True), source="multiclique_account.public_keys")
+    signatories = ListField(child=CharField(required=True), source="multiclique_account.signatories")
 
     class Meta:
         model = models.MultiCliqueTransaction
@@ -55,5 +55,5 @@ class MultiCliqueTransactionSerializer(ModelSerializer):
             "updated_at",
             "multiclique_address",
             "default_threshold",
-            "public_keys",
+            "signatories",
         )

@@ -17,7 +17,8 @@ class MultiCliquePolicy(TimestampableMixin):
 
 class MultiCliqueAccount(TimestampableMixin):
     address = models.CharField(primary_key=True, max_length=128)
-    public_keys = ArrayField(models.CharField(max_length=256), default=list)
+    name = models.CharField(max_length=128)
+    signatories = ArrayField(models.CharField(max_length=256), default=list)
     default_threshold = models.PositiveIntegerField(null=True)
     policy = models.ForeignKey(MultiCliquePolicy, on_delete=models.SET_NULL, null=True)
 
