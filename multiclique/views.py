@@ -25,8 +25,8 @@ from core.view_utils import (
 from multiclique import models, serializers
 from multiclique.serializers import InstallAccountAndPolicySerializer
 
-MULTICLIQUE_WASM = "e5fafe7d0240f37cb75ce391398a4e0d1d628eff89d04f62d2cde65489aa0f8e"
-ELIO_PRESET_WASM = "26b9b25c6d500260de2aeef80e8810643a95223f003d2607a6006e4ff26db211"
+MULTICLIQUE_WASM = "8765a46f3e4030828ffe42ec0b131084516b6c0abc4b02ff938f58e773ab0239"
+ELIO_PRESET_WASM = "31c00a0582d7263786e3ec3187bbb067f208cbc68fb799965bd9523614566d8e"
 
 
 @api_view(["POST"])
