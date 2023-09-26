@@ -8,6 +8,7 @@ https://docs.djangoproject.com/en/4.1/ref/settings/
 
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from corsheaders.defaults import default_headers
@@ -110,15 +111,6 @@ DATABASES = {
     },
 }
 
-# Password validation
-# https://docs.djangoproject.com/en/4.1/ref/settings/#auth-password-validators
-AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
-]
-
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "info").upper()
 
 SLACK_DEFAULT_URL = os.environ.get("SLACK_DEFAULT_URL")
@@ -152,6 +144,7 @@ LOGGING = {
 # Rest Framework
 # http://www.django-rest-framework.org/
 REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": ("rest_framework_simplejwt.authentication.JWTStatelessUserAuthentication",),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.LimitOffsetPagination",
     "DEFAULT_PARSER_CLASSES": ("rest_framework.parsers.JSONParser",),
     "DEFAULT_PERMISSION_CLASSES": ("rest_framework.permissions.AllowAny",),
@@ -159,6 +152,14 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_RATES": {
         "user": "5/hour",
     },
+}
+
+SIMPLE_JWT = {
+    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=10),
+    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "SIGNING_KEY": SECRET_KEY,
+    "USER_ID_FIELD": "address",
+    "ROTATE_REFRESH_TOKENS": True,
 }
 
 # Internationalization
@@ -241,7 +242,14 @@ SWAGGER_SETTINGS = {
             "type": "allow any",
         },
         "Signature": {
+            "name": "Signature",
+            "in": "header",
             "type": "Signature in Header",
+        },
+        "Bearer": {
+            "name": "Authorization",
+            "in": "header",
+            "type": "JWT Token in Header",
         },
     },
 }

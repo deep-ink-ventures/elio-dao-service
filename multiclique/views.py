@@ -1,20 +1,27 @@
 import os
 import re
+import secrets
 
 from django.conf import settings
+from django.core.cache import cache
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
-from rest_framework.decorators import api_view
+from rest_framework.decorators import action, api_view
 from rest_framework.exceptions import ValidationError
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST
 from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from stellar_sdk import TransactionBuilder
 from stellar_sdk.exceptions import PrepareTransactionException
 
-from core.view_utils import MultiQsLimitOffsetPagination, SearchableMixin
+from core.view_utils import (
+    IsAuthenticated,
+    MultiQsLimitOffsetPagination,
+    SearchableMixin,
+)
 from multiclique import models, serializers
 from multiclique.serializers import InstallAccountAndPolicySerializer
 
@@ -120,12 +127,71 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
             headers=self.get_success_headers(data=res_data),
         )
 
+    @swagger_auto_schema(
+        method="GET",
+        operation_id="Challenge",
+        operation_description="Retrieves a challenge to login for the given MultiClique Account.",
+        responses=openapi.Responses(
+            responses={HTTP_200_OK: openapi.Response("", serializers.MultiCliqueChallengeSerializer)}
+        ),
+        security=[{"Basic": []}],
+    )
+    @action(
+        methods=["GET"],
+        detail=True,
+        url_path="challenge",
+    )
+    def challenge(self, request, **_):
+        challenge_token = secrets.token_hex(64)
+        cache.set(key=self.get_object().address, value=challenge_token, timeout=settings.CHALLENGE_LIFETIME)
+        return Response(status=HTTP_200_OK, data={"challenge": challenge_token})
+
+    @swagger_auto_schema(
+        method="POST",
+        operation_id="Create JWT Token",
+        operation_description="Creates a JWT Token for the given MultiClique Account.",
+        request_body=serializers.MultiCliqueAuthSerializer,
+        responses=openapi.Responses(responses={HTTP_200_OK: openapi.Response("", serializers.JWTTokenSerializer)}),
+        security=[{"Basic": []}],
+    )
+    @action(
+        methods=["POST"],
+        detail=True,
+        url_path="create-jwt-token",
+    )
+    def create_jwt_token(self, request, **kwargs):
+        serializer = serializers.MultiCliqueAuthSerializer(data={"address": kwargs["address"], **request.data})
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=HTTP_200_OK)
+
+    @swagger_auto_schema(
+        method="POST",
+        operation_id="Refresh JWT Token",
+        operation_description="Refreshes a JWT Token for the given MultiClique Account.",
+        request_body=serializers.JWTTokenSerializer,
+        responses=openapi.Responses(responses={HTTP_200_OK: openapi.Response("", serializers.JWTTokenSerializer)}),
+        security=[{"Basic": []}],
+    )
+    @action(
+        methods=["POST"],
+        detail=True,
+        url_path="refresh-jwt-token",
+    )
+    def refresh_jwt_token(self, request, **kwargs):
+        serializer = TokenRefreshSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=HTTP_200_OK)
+
 
 class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, UpdateModelMixin, SearchableMixin):
     queryset = models.MultiCliqueTransaction.objects.all()
     serializer_class = serializers.MultiCliqueTransactionSerializer
     filter_fields = ["xdr", "multiclique_account__address"]
     ordering_fields = ["call_func", "status", "executed_at"]
+    permission_classes = [IsAuthenticated]
+
+    def filter_queryset(self, queryset):
+        return super().filter_queryset(queryset).filter(multiclique_account__address=self.request.user.id)
 
     def get_queryset(self):
         return self.queryset.select_related("multiclique_account")
@@ -137,7 +203,7 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Upda
         responses={
             201: openapi.Response("", serializers.MultiCliqueTransactionSerializer),
         },
-        security=[{"Basic": []}],
+        security=[{"Bearer": []}],
     )
     def create(self, request, *args, **kwargs):
         from core.soroban import InvalidXDRException, soroban_service

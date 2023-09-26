@@ -11,6 +11,7 @@ from rest_framework.mixins import ListModelMixin, RetrieveModelMixin
 from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.permissions import BasePermission
 from rest_framework.viewsets import GenericViewSet
+from rest_framework_simplejwt.authentication import JWTStatelessUserAuthentication
 
 
 class IsDAOOwner(BasePermission):
@@ -63,6 +64,15 @@ class IsTokenHolder(BasePermission):
                 "owner_id", flat=True
             )
         )
+
+
+class IsAuthenticated(BasePermission):
+    message = {"error": "Invalid JWT token."}
+
+    def has_permission(self, request, view):
+        if not (res := JWTStatelessUserAuthentication().authenticate(request=request)):
+            return False
+        return res[0].is_authenticated
 
 
 class MultiQsLimitOffsetPagination(LimitOffsetPagination):
@@ -180,6 +190,9 @@ class SearchableMixin(GenericViewSet):
     def _copy_func(f):
         return FunctionType(f.__code__, f.__globals__, f.__name__, f.__defaults__, f.__closure__)
 
+    def get_security(self):
+        return {"security": [{"Bearer" if self.permission_classes == [IsAuthenticated] else "Basic": []}]}
+
     def __init__(self, **kwargs):
         """
         adds swagger defaults retrieve and list views
@@ -198,7 +211,7 @@ class SearchableMixin(GenericViewSet):
             auto_schema = {
                 "operation_id": f"Retrieve {name}",
                 "operation_description": f"Retrieves a {name} instance.",
-                "security": [{"Basic": []}],
+                **self.get_security(),
                 **overrides,
             }
             get_fn._swagger_auto_schema = auto_schema
@@ -260,7 +273,7 @@ class SearchableMixin(GenericViewSet):
             auto_schema = {
                 "operation_id": f"List {name}",
                 "operation_description": f"Retrieves a list of {name}.",
-                "security": [{"Basic": []}],
+                **self.get_security(),
                 "manual_parameters": manual_parameters,
                 **overrides,
             }

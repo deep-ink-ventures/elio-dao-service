@@ -1,6 +1,9 @@
+from django.conf import settings
 from rest_framework import serializers
+from rest_framework.exceptions import ValidationError
 from rest_framework.fields import CharField, IntegerField, ListField
 from rest_framework.serializers import ModelSerializer, Serializer
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from multiclique import models
 
@@ -57,3 +60,41 @@ class MultiCliqueTransactionSerializer(ModelSerializer):
             "default_threshold",
             "signatories",
         )
+
+
+class MultiCliqueAuthSerializer(Serializer):
+    address = CharField(write_only=True)
+    signature = CharField(write_only=True)
+
+    access = CharField(read_only=True)
+    refresh = CharField(read_only=True)
+
+    def validate(self, attrs):
+        from core.soroban import soroban_service
+
+        if not (addr := attrs.get("address")):
+            raise ValidationError('Must include "multiclique_address".', code="authorization")
+        if not (sig := attrs.get("signature")):
+            raise ValidationError('Must include "signature".', code="authorization")
+
+        try:
+            acc = models.MultiCliqueAccount.objects.get(address=addr)
+        except models.MultiCliqueAccount.DoesNotExist:
+            raise ValidationError("MultiCliqueAccount does not exist.", code="authorization")
+
+        if not soroban_service.verify(address=addr, challenge_address=addr, signature=sig):
+            raise ValidationError("Signature does not match.", code="authorization")
+
+        refresh = TokenObtainPairSerializer.get_token(acc)
+        attrs["refresh"] = str(refresh)
+        attrs["access"] = str(refresh.access_token)  # type: ignore
+        return attrs
+
+
+class JWTTokenSerializer(Serializer):
+    access = CharField()
+    refresh = CharField()
+
+
+class MultiCliqueChallengeSerializer(Serializer):
+    challenge = CharField(help_text=f"Valid for {settings.CHALLENGE_LIFETIME}s.")

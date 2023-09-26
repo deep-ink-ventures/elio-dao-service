@@ -1,10 +1,19 @@
+import base64
 from collections.abc import Collection
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
+from django.core.cache import cache
 from django.urls import reverse
 from django.utils.timezone import now
 from rest_framework.fields import DateTimeField
-from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST
+from rest_framework.status import (
+    HTTP_200_OK,
+    HTTP_201_CREATED,
+    HTTP_400_BAD_REQUEST,
+    HTTP_404_NOT_FOUND,
+)
+from rest_framework_simplejwt.tokens import RefreshToken
+from stellar_sdk import Keypair
 
 from core.soroban import InvalidXDRException
 from core.tests.testcases import IntegrationTestCase
@@ -60,6 +69,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "signatories": self.signatories,
             "default_threshold": 2,
         }
+
         with self.assertNumQueries(1):
             res = self.client.get(reverse("multiclique-accounts-detail", kwargs={"address": "addr1"}))
 
@@ -99,6 +109,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "signatories": self.signatories,
             "default_threshold": 3,
         }
+
         with self.assertNumQueries(11):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
@@ -142,6 +153,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 "default_threshold": 2,
             }
         )
+
         with self.assertNumQueries(9):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
@@ -182,6 +194,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "signatories": self.signatories,
             "default_threshold": 3,
         }
+
         with self.assertNumQueries(6):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
@@ -198,10 +211,11 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
-    def test_multiclique_account_invalid(self):
+    def test_multiclique_account_create_invalid(self):
         expected_res = {
             "name": ["This field is required."],
         }
+
         with self.assertNumQueries(1):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
@@ -216,6 +230,69 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
         self.assertDictEqual(res.json(), expected_res)
+
+    def test_multiclique_account_challenge(self):
+        cache.clear()
+        expected_res = {"challenge": ANY}
+
+        with self.assertNumQueries(1):
+            res = self.client.get(reverse("multiclique-accounts-challenge", kwargs={"address": self.mc1.address}))
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), expected_res)
+        self.assertEqual(cache.get(self.mc1.address), res.json()["challenge"])
+
+    def test_multiclique_account_create_jwt_token(self):
+        challenge = "hard_challenge"
+        keypair = Keypair.random()
+        cache.set(key=keypair.public_key, value=challenge, timeout=5)
+        sig = base64.b64encode(keypair.sign(data=challenge.encode())).decode()
+        acc = models.MultiCliqueAccount.objects.create(
+            address=keypair.public_key, name="acc3", policy=self.pol1, signatories=self.signatories, default_threshold=2
+        )
+
+        with self.assertNumQueries(1):
+            res = self.client.post(
+                reverse("multiclique-accounts-create-jwt-token", kwargs={"address": acc.address}),
+                data={"signature": sig},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), {"access": ANY, "refresh": ANY})
+
+    def test_multiclique_account_create_jwt_token_wrong_sig(self):
+        challenge = "hard_challenge"
+        keypair = Keypair.random()
+        cache.set(key=keypair.public_key, value=challenge, timeout=5)
+        acc = models.MultiCliqueAccount.objects.create(
+            address=keypair.public_key, name="acc3", policy=self.pol1, signatories=self.signatories, default_threshold=2
+        )
+
+        with self.assertNumQueries(1):
+            res = self.client.post(
+                reverse("multiclique-accounts-create-jwt-token", kwargs={"address": acc.address}),
+                data={"signature": "wrong"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
+
+    def test_multiclique_account_refresh_jwt_token(self):
+        token = RefreshToken.for_user(self.mc1)
+        expected_res = {"access": ANY, "refresh": ANY}
+
+        with self.assertNumQueries(0):
+            res = self.client.post(
+                reverse("multiclique-accounts-refresh-jwt-token", kwargs={"address": self.mc1.address}),
+                data={"access": str(token.access_token), "refresh": str(token)},  # type: ignore
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertEqual(res.json(), expected_res)
+        self.assertNotEqual(res.json()["access"], {"access": str(token.access_token)})  # type:ignore
+        self.assertNotEqual(res.json()["refresh"], {"access": str(token)})
 
     def test_multiclique_transaction_get(self):
         expected_res = {
@@ -233,15 +310,32 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "default_threshold": self.mc1.default_threshold,
             "signatories": self.mc1.signatories,
         }
+
         with self.assertNumQueries(1):
             res = self.client.get(
                 reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
+    def test_multiclique_transaction_get_filtering(self):
+        expected_res = {"detail": "Not found."}
+
+        with self.assertNumQueries(1):
+            res = self.client.get(
+                reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc2).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_404_NOT_FOUND, res.json())
+        self.assertDictEqual(res.json(), expected_res)
+
     def test_multiclique_transaction_list(self):
+        self.txn2.multiclique_account = self.mc1
+        self.txn2.save()
+
         expected_res = self.wrap_in_pagination_res(
             [
                 {
@@ -270,15 +364,47 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "executed_at": self.fmt_dt(self.txn2.executed_at),
                     "created_at": self.fmt_dt(self.txn2.created_at),
                     "updated_at": self.fmt_dt(self.txn2.updated_at),
-                    "multiclique_address": self.mc2.address,
-                    "default_threshold": self.mc2.default_threshold,
-                    "signatories": self.mc2.signatories,
+                    "multiclique_address": self.mc1.address,
+                    "default_threshold": self.mc1.default_threshold,
+                    "signatories": self.mc1.signatories,
                 },
             ]
         )
+
         with self.assertNumQueries(2):
             res = self.client.get(
                 reverse("multiclique-transactions-list"),
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), expected_res)
+
+    def test_multiclique_transaction_list_filtering(self):
+        expected_res = self.wrap_in_pagination_res(
+            [
+                {
+                    "xdr": self.txn1.xdr,
+                    "preimage_hash": self.txn1.preimage_hash,
+                    "call_func": self.txn1.call_func,
+                    "call_args": self.txn1.call_args,
+                    "approvers": self.txn1.approvers,
+                    "rejecters": self.txn1.rejecters,
+                    "status": self.txn1.status,
+                    "executed_at": self.fmt_dt(self.txn1.executed_at),
+                    "created_at": self.fmt_dt(self.txn1.created_at),
+                    "updated_at": self.fmt_dt(self.txn1.updated_at),
+                    "multiclique_address": self.mc1.address,
+                    "default_threshold": self.mc1.default_threshold,
+                    "signatories": self.mc1.signatories,
+                },
+            ]
+        )
+
+        with self.assertNumQueries(2):
+            res = self.client.get(
+                reverse("multiclique-transactions-list"),
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -316,6 +442,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                 },
                 content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
         self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
@@ -357,6 +484,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                 },
                 content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
         self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
@@ -375,6 +503,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": "wrong addr",
                 },
                 content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
         self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
