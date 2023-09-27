@@ -1,7 +1,7 @@
 from django.conf import settings
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from rest_framework.fields import CharField, IntegerField, ListField
+from rest_framework.fields import CharField, IntegerField
 from rest_framework.serializers import ModelSerializer, Serializer
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -19,12 +19,30 @@ class MultiCliquePolicySerializer(ModelSerializer):
         fields = ("name", "active")
 
 
+class MultiCliqueSignatorySerializer(ModelSerializer):
+    class Meta:
+        model = models.MultiCliqueSignatory
+        fields = ("public_key", "name")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # we don't want the unique validator here
+        self.fields["public_key"].validators.pop(0)
+
+
 class MultiCliqueAccountSerializer(ModelSerializer):
     policy = CharField(source="policy.name", help_text="e.g.: ELIO_DAO")
+    signatories = MultiCliqueSignatorySerializer(many=True)
 
     class Meta:
         model = models.MultiCliqueAccount
         fields = ("address", "name", "signatories", "default_threshold", "policy")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # we don't want the unique validators here
+        self.fields["address"].validators.pop(0)
+        self.fields["policy"].validators.pop(0)
 
 
 class CreateMultiCliqueTransactionSerializer(Serializer):
@@ -41,7 +59,7 @@ class CreateMultiCliqueTransactionSerializer(Serializer):
 class MultiCliqueTransactionSerializer(ModelSerializer):
     multiclique_address = CharField(source="multiclique_account.address")
     default_threshold = IntegerField(source="multiclique_account.default_threshold")
-    signatories = ListField(child=CharField(required=True), source="multiclique_account.signatories")
+    signatories = MultiCliqueSignatorySerializer(many=True, source="multiclique_account.signatories")
 
     class Meta:
         model = models.MultiCliqueTransaction

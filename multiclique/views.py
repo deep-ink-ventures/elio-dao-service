@@ -4,11 +4,12 @@ import secrets
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import transaction
+from django.db.models import Prefetch
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
 from rest_framework import status
 from rest_framework.decorators import action, api_view
-from rest_framework.exceptions import ValidationError
 from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST
@@ -85,7 +86,9 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
     lookup_field = "address"
 
     def get_queryset(self):
-        return self.queryset.select_related("policy")
+        return self.queryset.select_related("policy").prefetch_related(
+            Prefetch("signatories", queryset=models.MultiCliqueSignatory.objects.order_by("public_key"))
+        )
 
     @swagger_auto_schema(
         operation_id="Create / Update MultiCliqueAccount",
@@ -99,28 +102,24 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
     )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
-        try:
-            serializer.is_valid(raise_exception=True)
-        except ValidationError as err:
-            # we ignore unique address error, since we want to update these accounts if they exist already
-            if addr_err := err.detail.get("address"):
-                if addr_err[0].code == "unique":
-                    err.detail.pop("address")
-            if err.detail:
-                raise
-
+        serializer.is_valid(raise_exception=True)
         data = serializer.data
         # to UPPER_SNAKE_CASE
         policy_name = re.sub(r"_+", "_", re.sub(r"[\s|\-|\.]+", "_", data["policy"].upper()))  # noqa
-        multiclique_acc, created = models.MultiCliqueAccount.objects.update_or_create(
-            address=data["address"],
-            defaults={
-                "name": data["name"],
-                "signatories": data["signatories"],
-                "default_threshold": data["default_threshold"],
-                "policy": models.MultiCliquePolicy.objects.get_or_create(name=policy_name)[0],
-            },
-        )
+        with transaction.atomic():
+            signatories = models.MultiCliqueSignatory.objects.bulk_create(
+                [models.MultiCliqueSignatory(**entry) for entry in data["signatories"]], ignore_conflicts=True
+            )
+            multiclique_acc, created = models.MultiCliqueAccount.objects.update_or_create(
+                address=data["address"],
+                defaults={
+                    "name": data["name"],
+                    "default_threshold": data["default_threshold"],
+                    "policy": models.MultiCliquePolicy.objects.get_or_create(name=policy_name)[0],
+                },
+            )
+            multiclique_acc.signatories.set(signatories)
+            multiclique_acc.save()
         res_data = self.get_serializer(multiclique_acc).data
         return Response(
             data=res_data,

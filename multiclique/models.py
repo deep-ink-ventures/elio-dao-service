@@ -15,10 +15,20 @@ class MultiCliquePolicy(TimestampableMixin):
         verbose_name_plural = "MultiClique Policies"
 
 
+class MultiCliqueSignatory(TimestampableMixin):
+    public_key = models.CharField(primary_key=True, max_length=128)
+    name = models.CharField(max_length=128, null=True)
+
+    class Meta:
+        db_table = "multiclique_signatory"
+        verbose_name = "MultiClique Signatory"
+        verbose_name_plural = "MultiClique Signatories"
+
+
 class MultiCliqueAccount(TimestampableMixin):
     address = models.CharField(primary_key=True, max_length=128)
     name = models.CharField(max_length=128)
-    signatories = ArrayField(models.CharField(max_length=256), default=list)
+    signatories = models.ManyToManyField(MultiCliqueSignatory, related_name="accounts")
     default_threshold = models.PositiveIntegerField(null=True)
     policy = models.ForeignKey(MultiCliquePolicy, on_delete=models.SET_NULL, null=True)
 

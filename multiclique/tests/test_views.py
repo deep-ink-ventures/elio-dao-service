@@ -26,15 +26,18 @@ from multiclique import models
 class MultiCliqueViewSetTest(IntegrationTestCase):
     def setUp(self):
         super().setUp()
-        self.signatories = ["pk1", "pk2", "pk3", "pk4"]
+        self.sig1 = models.MultiCliqueSignatory.objects.create(public_key="pk1", name="sig1")
+        self.sig2 = models.MultiCliqueSignatory.objects.create(public_key="pk2", name="sig2")
+        self.sig3 = models.MultiCliqueSignatory.objects.create(public_key="pk3", name="sig3")
+        self.sig4 = models.MultiCliqueSignatory.objects.create(public_key="pk4", name="sig4")
         self.pol1 = models.MultiCliquePolicy.objects.create(name="POL1", active=True)
         self.pol2 = models.MultiCliquePolicy.objects.create(name="POL2", active=False)
-        self.mc1 = models.MultiCliqueAccount.objects.create(
-            address="addr1", name="acc1", policy=self.pol1, signatories=self.signatories, default_threshold=2
-        )
-        self.mc2 = models.MultiCliqueAccount.objects.create(
-            address="addr2", name="acc2", policy=self.pol2, signatories=self.signatories[1:3], default_threshold=2
-        )
+        self.mc1 = models.MultiCliqueAccount(address="addr1", name="acc1", policy=self.pol1, default_threshold=2)
+        self.mc1.signatories.set([self.sig1, self.sig2, self.sig3, self.sig4])
+        self.mc1.save()
+        self.mc2 = models.MultiCliqueAccount(address="addr2", name="acc2", policy=self.pol2, default_threshold=2)
+        self.mc2.signatories.set([self.sig2, self.sig3])
+        self.mc2.save()
         self.txn1 = models.MultiCliqueTransaction.objects.create(
             multiclique_account=self.mc1,
             xdr="xdr1",
@@ -69,11 +72,16 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "address": "addr1",
             "name": "acc1",
             "policy": "POL1",
-            "signatories": self.signatories,
+            "signatories": [
+                {"public_key": "pk1", "name": "sig1"},
+                {"public_key": "pk2", "name": "sig2"},
+                {"public_key": "pk3", "name": "sig3"},
+                {"public_key": "pk4", "name": "sig4"},
+            ],
             "default_threshold": 2,
         }
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             res = self.client.get(reverse("multiclique-accounts-detail", kwargs={"address": "addr1"}))
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -86,19 +94,27 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "address": "addr1",
                     "name": "acc1",
                     "policy": "POL1",
-                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                     "default_threshold": 2,
                 },
                 {
                     "address": "addr2",
                     "name": "acc2",
                     "policy": "POL2",
-                    "signatories": ["pk2", "pk3"],
+                    "signatories": [
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                    ],
                     "default_threshold": 2,
                 },
             ]
         )
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             res = self.client.get(reverse("multiclique-accounts-list"), {"ordering": "address"})
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -114,14 +130,14 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     )
     def test_multiclique_account_list_filter(self, case):
         _filter, expected_res = case
-        models.MultiCliqueAccount.objects.create(
-            address="addr3", name="acc3", policy=self.pol1, signatories=["pk1"], default_threshold=2
-        )
-        models.MultiCliqueAccount.objects.create(
-            address="addr4", name="acc4", policy=self.pol1, signatories=["pk4", "pk1"], default_threshold=2
-        )
+        mc3 = models.MultiCliqueAccount(address="addr3", name="acc3", policy=self.pol1, default_threshold=2)
+        mc3.signatories.set([self.sig1])
+        mc3.save()
+        mc4 = models.MultiCliqueAccount(address="addr4", name="acc4", policy=self.pol1, default_threshold=2)
+        mc4.signatories.set([self.sig4, self.sig1])
+        mc4.save()
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             res = self.client.get(reverse("multiclique-accounts-list"), {"signatories": _filter, "ordering": "address"})
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -132,18 +148,28 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "address": "addr3",
             "name": "acc1",
             "policy": "POL_3",
-            "signatories": self.signatories,
+            "signatories": [
+                {"public_key": "pk1", "name": "sig1"},
+                {"public_key": "pk2", "name": "sig2"},
+                {"public_key": "pk5", "name": None},  # new
+                {"public_key": "pk6", "name": "sig6"},  # new
+            ],
             "default_threshold": 3,
         }
 
-        with self.assertNumQueries(11):
+        with self.assertNumQueries(17):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr3",
                     "name": "acc1",
                     "policy": "pOl_ 3",
-                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2"},
+                        {"public_key": "pk5"},
+                        {"public_key": "pk6", "name": "sig6"},
+                    ],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
@@ -151,43 +177,79 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
         self.assertDictEqual(res.json(), expected_res)
+        mc3 = models.MultiCliqueAccount.objects.get(address="addr3")
+        self.assertModelEqual(
+            mc3,
+            models.MultiCliqueAccount(
+                **{
+                    "address": "addr3",
+                    "name": "acc1",
+                    "policy": models.MultiCliquePolicy.objects.get(name="POL_3"),
+                    "default_threshold": 3,
+                }
+            ),
+            ignore_fields=("created_at", "updated_at", "signatories"),
+        )
         self.assertModelsEqual(
-            models.MultiCliqueAccount.objects.order_by("address"),
+            mc3.signatories.all(),
             [
-                self.mc1,
-                self.mc2,
-                models.MultiCliqueAccount(
-                    **{**expected_res, "policy": models.MultiCliquePolicy.objects.get(name="POL_3")}
-                ),
+                self.sig1,
+                self.sig2,
+                models.MultiCliqueSignatory.objects.get(public_key="pk5"),
+                models.MultiCliqueSignatory.objects.get(public_key="pk6"),
             ],
         )
+        self.assertModelsEqual(
+            models.MultiCliqueAccount.objects.order_by("address"),
+            [self.mc1, self.mc2, mc3],
+        )
+        expected_sigs = [
+            self.sig1,
+            self.sig2,
+            self.sig3,
+            self.sig4,
+            models.MultiCliqueSignatory(public_key="pk5"),
+            models.MultiCliqueSignatory(public_key="pk6", name="sig6"),
+        ]
+        self.assertModelsEqual(models.MultiCliqueSignatory.objects.order_by("public_key"), expected_sigs)
 
     def test_multiclique_account_create_existing_account(self):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
             "policy": "POL_3",
-            "signatories": self.signatories,
+            "signatories": [
+                {"public_key": "pk1", "name": "sig1"},
+                {"public_key": "pk2", "name": "sig2"},
+                {"public_key": "pk3", "name": "sig3"},
+                {"public_key": "pk4", "name": "sig4"},
+            ],
             "default_threshold": 3,
         }
-        models.MultiCliqueAccount.objects.create(
+        mc3 = models.MultiCliqueAccount(
             **{
                 "address": "addr3",
                 "name": "acc2",
                 "policy": self.pol1,
-                "signatories": self.signatories,
                 "default_threshold": 2,
             }
         )
+        mc3.signatories.set([self.sig1, self.sig2, self.sig3, self.sig4])
+        mc3.save()
 
-        with self.assertNumQueries(9):
+        with self.assertNumQueries(14):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr3",
                     "name": "acc1",
                     "policy": "pOl_ 3",
-                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
@@ -195,40 +257,49 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
-        self.assertModelsEqual(
-            models.MultiCliqueAccount.objects.order_by("address"),
-            [
-                self.mc1,
-                self.mc2,
-                models.MultiCliqueAccount(
-                    **{
-                        "address": "addr3",
-                        "name": "acc1",
-                        "policy": models.MultiCliquePolicy.objects.get(name="POL_3"),
-                        "signatories": self.signatories,
-                        "default_threshold": 3,
-                    }
-                ),
-            ],
+        mc3 = models.MultiCliqueAccount.objects.get(address="addr3")
+        self.assertModelEqual(
+            mc3,
+            models.MultiCliqueAccount(
+                **{
+                    "address": "addr3",
+                    "name": "acc1",
+                    "policy": models.MultiCliquePolicy.objects.get(name="POL_3"),
+                    "default_threshold": 3,
+                }
+            ),
+            ignore_fields=("created_at", "updated_at", "signatories"),
         )
+        self.assertModelsEqual(mc3.signatories.all(), [self.sig1, self.sig2, self.sig3, self.sig4])
+        self.assertModelsEqual(models.MultiCliqueAccount.objects.order_by("address"), [self.mc1, self.mc2, mc3])
 
     def test_multiclique_account_create_existing_policy(self):
         expected_res = {
             "address": "addr2",
             "name": "acc1",
             "policy": "POL2",
-            "signatories": self.signatories,
+            "signatories": [
+                {"public_key": "pk1", "name": "sig1"},
+                {"public_key": "pk2", "name": "sig2"},
+                {"public_key": "pk3", "name": "sig3"},
+                {"public_key": "pk4", "name": "sig4"},
+            ],
             "default_threshold": 3,
         }
 
-        with self.assertNumQueries(6):
+        with self.assertNumQueries(12):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr2",
                     "name": "acc1",
                     "policy": "POL2",
-                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
@@ -242,13 +313,18 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": ["This field is required."],
         }
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(0):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr2",
                     "policy": "POL2",
-                    "signatories": ["pk1", "pk2", "pk3", "pk4"],
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                     "default_threshold": 3,
                 },
                 content_type="application/json",
@@ -261,7 +337,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         cache.clear()
         expected_res = {"challenge": ANY}
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             res = self.client.get(reverse("multiclique-accounts-challenge", kwargs={"address": self.mc1.address}))
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -274,7 +350,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         cache.set(key=keypair.public_key, value=challenge, timeout=5)
         sig = base64.b64encode(keypair.sign(data=challenge.encode())).decode()
         acc = models.MultiCliqueAccount.objects.create(
-            address=keypair.public_key, name="acc3", policy=self.pol1, signatories=self.signatories, default_threshold=2
+            address=keypair.public_key, name="acc3", policy=self.pol1, default_threshold=2
         )
 
         with self.assertNumQueries(1):
@@ -292,7 +368,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         keypair = Keypair.random()
         cache.set(key=keypair.public_key, value=challenge, timeout=5)
         acc = models.MultiCliqueAccount.objects.create(
-            address=keypair.public_key, name="acc3", policy=self.pol1, signatories=self.signatories, default_threshold=2
+            address=keypair.public_key, name="acc3", policy=self.pol1, default_threshold=2
         )
 
         with self.assertNumQueries(1):
@@ -305,7 +381,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
 
     def test_multiclique_account_refresh_jwt_token(self):
-        token = RefreshToken.for_user(self.mc1)
+        token = RefreshToken.for_user(self.mc1)  # type: ignore
         expected_res = {"access": ANY, "refresh": ANY}
 
         with self.assertNumQueries(0):
@@ -334,10 +410,15 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "updated_at": self.fmt_dt(self.txn1.updated_at),
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
-            "signatories": self.mc1.signatories,
+            "signatories": [
+                {"public_key": "pk1", "name": "sig1"},
+                {"public_key": "pk2", "name": "sig2"},
+                {"public_key": "pk3", "name": "sig3"},
+                {"public_key": "pk4", "name": "sig4"},
+            ],
         }
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             res = self.client.get(
                 reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
@@ -388,7 +469,12 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "updated_at": self.fmt_dt(self.txn1.updated_at),
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
-                    "signatories": self.mc1.signatories,
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                 },
                 {
                     "xdr": self.txn2.xdr,
@@ -403,12 +489,17 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "updated_at": self.fmt_dt(self.txn2.updated_at),
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
-                    "signatories": self.mc1.signatories,
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                 },
             ]
         )
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(4):
             res = self.client.get(
                 reverse("multiclique-transactions-list"),
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
@@ -433,12 +524,17 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "updated_at": self.fmt_dt(self.txn1.updated_at),
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
-                    "signatories": self.mc1.signatories,
+                    "signatories": [
+                        {"public_key": "pk1", "name": "sig1"},
+                        {"public_key": "pk2", "name": "sig2"},
+                        {"public_key": "pk3", "name": "sig3"},
+                        {"public_key": "pk4", "name": "sig4"},
+                    ],
                 },
             ]
         )
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             res = self.client.get(
                 reverse("multiclique-transactions-list"),
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
@@ -468,10 +564,15 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "executed_at": None,
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
-            "signatories": self.mc1.signatories,
+            "signatories": [
+                {"public_key": "pk1", "name": "sig1"},
+                {"public_key": "pk2", "name": "sig2"},
+                {"public_key": "pk3", "name": "sig3"},
+                {"public_key": "pk4", "name": "sig4"},
+            ],
         }
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             res = self.client.post(
                 reverse("multiclique-transactions-list"),
                 data={
