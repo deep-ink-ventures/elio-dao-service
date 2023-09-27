@@ -80,6 +80,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
     pagination_class = MultiQsLimitOffsetPagination
     serializer_class = serializers.MultiCliqueAccountSerializer
     search_fields = ["address", "signatories"]
+    filter_fields = ["signatories"]
     ordering_fields = ["address"]
     lookup_field = "address"
 

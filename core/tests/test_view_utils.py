@@ -1,7 +1,10 @@
 from unittest.mock import Mock
 
 from ddt import data, ddt
+from django.contrib.postgres.fields import ArrayField
 from django.db import connection, models
+from django.db.models import CharField
+from django.http import QueryDict
 from rest_framework.exceptions import ValidationError
 
 from core.tests.testcases import IntegrationTestCase, UnitTestCase
@@ -16,21 +19,24 @@ class QueryFilterTest(UnitTestCase):
     @data(
         # query_params, filter_fields, expected err msg
         # no allowed filter fields
-        ({"a": 1}, (), "'a' is an invalid filter field. Choices are: pk"),
+        ({"a": "1"}, (), "'a' is an invalid filter field. Choices are: pk"),
         # not in allowed filter fields
-        ({"a": 1, "b": 1}, ("a",), "'b' is an invalid filter field. Choices are: pk, a"),
+        ({"a": "1", "b": "1"}, ("a",), "'b' is an invalid filter field. Choices are: pk, a"),
         # happy paths
         ({}, (), None),
-        ({"pk": 1}, (), None),
-        ({"pk": 1}, (), None),
-        ({"a": 1}, ("a",), None),
-        ({"a": 1}, ("a", "b"), None),
-        ({"a": 1, "b": 2}, ("a", "b"), None),
+        ({"pk": "1"}, (), None),
+        ({"pk": "1"}, (), None),
+        ({"a": "1"}, ("a",), None),
+        ({"a": "1"}, ("a", "b"), None),
+        ({"a": "1", "b": "2"}, ("a", "b"), None),
     )
     def test_filter_queryset(self, case):
         query_params, filter_fields, expected_err_msg = case
-        request = Mock(query_params=query_params)
-        qs = Mock()
+        query_dict = QueryDict(mutable=True)
+        for k, v in query_params.items():
+            query_dict.appendlist(k, v)
+        request = Mock(query_params=query_dict)
+        qs = Mock(model=Mock(_meta=Mock(fields=[])))
         view = Mock(filter_fields=filter_fields)
 
         if expected_err_msg:
@@ -43,6 +49,15 @@ class QueryFilterTest(UnitTestCase):
                 qs.filter.assert_called_once_with(**query_params)
             else:
                 qs.filter.assert_called_once_with()
+
+    def test_filter_queryset_array_field(self):
+        request = Mock(query_params=QueryDict(b"a=1&b=2&b=3&c=4"))
+        qs = Mock(model=Mock(_meta=Mock(fields=[ArrayField(CharField(), name=name) for name in ("a", "b", "c")])))
+        view = Mock(filter_fields=["a", "b", "c"])
+
+        self.filter_backend.filter_queryset(request=request, queryset=qs, view=view)
+
+        qs.filter.assert_called_once_with(a__contains=["1"], b__contains=["2", "3"], c__contains=["4"])
 
 
 class TestModel(models.Model):

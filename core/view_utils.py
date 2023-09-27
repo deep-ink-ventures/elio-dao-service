@@ -3,6 +3,7 @@ from itertools import chain
 from types import FunctionType
 from typing import Optional
 
+from django.contrib.postgres.fields import ArrayField
 from django.db.models import QuerySet
 from drf_yasg import openapi
 from rest_framework.exceptions import ValidationError
@@ -157,6 +158,25 @@ signed_by_token_holder = openapi.Parameter(
 )
 
 
+def is_array_field(field_name: str, queryset: QuerySet):
+    """
+    Args:
+        field_name: name of the field
+        queryset: Queryset to check for the field for
+
+    Returns:
+        is the field an array field, bool
+
+    goes through all fields of the queryset to check if the field is an ArrayField
+    """
+    for field in queryset.model._meta.fields:  # noqa
+        if field.name == field_name:
+            if isinstance(field, ArrayField):
+                return True
+            return False
+    return False
+
+
 class QueryFilter:
     always_accept = ["pk"]
     ignored_filter_fields = ["limit", "offset", "ordering", "search"]
@@ -175,7 +195,10 @@ class QueryFilter:
                     f"'{field}' is an invalid filter field. Choices are:"
                     f" {', '.join(chain(self.always_accept, filter_fields))}"
                 )
-            filters[field] = value
+            if is_array_field(field, queryset):
+                filters[f"{field}__contains"] = request.query_params.getlist(field)
+            else:
+                filters[field] = value
 
         return queryset.filter(**filters)
 

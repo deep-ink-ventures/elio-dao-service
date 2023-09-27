@@ -2,6 +2,7 @@ import base64
 from collections.abc import Collection
 from unittest.mock import ANY, patch
 
+from ddt import data, ddt
 from django.core.cache import cache
 from django.urls import reverse
 from django.utils.timezone import now
@@ -10,6 +11,7 @@ from rest_framework.status import (
     HTTP_200_OK,
     HTTP_201_CREATED,
     HTTP_400_BAD_REQUEST,
+    HTTP_401_UNAUTHORIZED,
     HTTP_404_NOT_FOUND,
 )
 from rest_framework_simplejwt.tokens import RefreshToken
@@ -20,6 +22,7 @@ from core.tests.testcases import IntegrationTestCase
 from multiclique import models
 
 
+@ddt
 class MultiCliqueViewSetTest(IntegrationTestCase):
     def setUp(self):
         super().setUp()
@@ -100,6 +103,29 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
+
+    @data(
+        # filter, expected_res
+        ([], ["addr1", "addr2", "addr3", "addr4"]),
+        ("pk1", ["addr1", "addr3", "addr4"]),
+        ("pk2", ["addr1", "addr2"]),
+        (["pk1"], ["addr1", "addr3", "addr4"]),
+        (["pk1", "pk4"], ["addr1", "addr4"]),
+    )
+    def test_multiclique_account_list_filter(self, case):
+        _filter, expected_res = case
+        models.MultiCliqueAccount.objects.create(
+            address="addr3", name="acc3", policy=self.pol1, signatories=["pk1"], default_threshold=2
+        )
+        models.MultiCliqueAccount.objects.create(
+            address="addr4", name="acc4", policy=self.pol1, signatories=["pk4", "pk1"], default_threshold=2
+        )
+
+        with self.assertNumQueries(2):
+            res = self.client.get(reverse("multiclique-accounts-list"), {"signatories": _filter, "ordering": "address"})
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertListEqual([entry["address"] for entry in res.json()["results"]], expected_res)
 
     def test_multiclique_account_create(self):
         expected_res = {
@@ -330,6 +356,17 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             )
 
         self.assertEqual(res.status_code, HTTP_404_NOT_FOUND, res.json())
+        self.assertDictEqual(res.json(), expected_res)
+
+    def test_multiclique_transaction_get_no_auth(self):
+        expected_res = {"detail": "Authentication credentials were not provided."}
+
+        with self.assertNumQueries(0):
+            res = self.client.get(
+                reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
+            )
+
+        self.assertEqual(res.status_code, HTTP_401_UNAUTHORIZED, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
     def test_multiclique_transaction_list(self):
