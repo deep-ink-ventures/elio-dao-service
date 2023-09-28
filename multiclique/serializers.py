@@ -22,12 +22,12 @@ class MultiCliquePolicySerializer(ModelSerializer):
 class MultiCliqueSignatorySerializer(ModelSerializer):
     class Meta:
         model = models.MultiCliqueSignatory
-        fields = ("public_key", "name")
+        fields = ("address", "name")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         # we don't want the unique validator here
-        self.fields["public_key"].validators.pop(0)
+        self.fields["address"].validators.pop(0)
 
 
 class MultiCliqueAccountSerializer(ModelSerializer):

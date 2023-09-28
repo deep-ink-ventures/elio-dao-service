@@ -16,7 +16,7 @@ class MultiCliquePolicy(TimestampableMixin):
 
 
 class MultiCliqueSignatory(TimestampableMixin):
-    public_key = models.CharField(primary_key=True, max_length=128)
+    address = models.CharField(primary_key=True, max_length=128)
     name = models.CharField(max_length=128, null=True)
 
     class Meta:

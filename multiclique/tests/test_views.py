@@ -26,10 +26,10 @@ from multiclique import models
 class MultiCliqueViewSetTest(IntegrationTestCase):
     def setUp(self):
         super().setUp()
-        self.sig1 = models.MultiCliqueSignatory.objects.create(public_key="pk1", name="sig1")
-        self.sig2 = models.MultiCliqueSignatory.objects.create(public_key="pk2", name="sig2")
-        self.sig3 = models.MultiCliqueSignatory.objects.create(public_key="pk3", name="sig3")
-        self.sig4 = models.MultiCliqueSignatory.objects.create(public_key="pk4", name="sig4")
+        self.sig1 = models.MultiCliqueSignatory.objects.create(address="pk1", name="sig1")
+        self.sig2 = models.MultiCliqueSignatory.objects.create(address="pk2", name="sig2")
+        self.sig3 = models.MultiCliqueSignatory.objects.create(address="pk3", name="sig3")
+        self.sig4 = models.MultiCliqueSignatory.objects.create(address="pk4", name="sig4")
         self.pol1 = models.MultiCliquePolicy.objects.create(name="POL1", active=True)
         self.pol2 = models.MultiCliquePolicy.objects.create(name="POL2", active=False)
         self.mc1 = models.MultiCliqueAccount(address="addr1", name="acc1", policy=self.pol1, default_threshold=2)
@@ -73,10 +73,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL1",
             "signatories": [
-                {"public_key": "pk1", "name": "sig1"},
-                {"public_key": "pk2", "name": "sig2"},
-                {"public_key": "pk3", "name": "sig3"},
-                {"public_key": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "sig1"},
+                {"address": "pk2", "name": "sig2"},
+                {"address": "pk3", "name": "sig3"},
+                {"address": "pk4", "name": "sig4"},
             ],
             "default_threshold": 2,
         }
@@ -95,10 +95,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "POL1",
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                     "default_threshold": 2,
                 },
@@ -107,8 +107,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc2",
                     "policy": "POL2",
                     "signatories": [
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
                     ],
                     "default_threshold": 2,
                 },
@@ -149,10 +149,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL_3",
             "signatories": [
-                {"public_key": "pk1", "name": "sig1"},
-                {"public_key": "pk2", "name": "sig2"},
-                {"public_key": "pk5", "name": None},  # new
-                {"public_key": "pk6", "name": "sig6"},  # new
+                {"address": "pk1", "name": "sig1"},
+                {"address": "pk2", "name": "sig2"},
+                {"address": "pk5", "name": None},  # new
+                {"address": "pk6", "name": "sig6"},  # new
             ],
             "default_threshold": 3,
         }
@@ -165,10 +165,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "pOl_ 3",
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2"},
-                        {"public_key": "pk5"},
-                        {"public_key": "pk6", "name": "sig6"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2"},
+                        {"address": "pk5"},
+                        {"address": "pk6", "name": "sig6"},
                     ],
                     "default_threshold": 3,
                 },
@@ -195,8 +195,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             [
                 self.sig1,
                 self.sig2,
-                models.MultiCliqueSignatory.objects.get(public_key="pk5"),
-                models.MultiCliqueSignatory.objects.get(public_key="pk6"),
+                models.MultiCliqueSignatory.objects.get(address="pk5"),
+                models.MultiCliqueSignatory.objects.get(address="pk6"),
             ],
         )
         self.assertModelsEqual(
@@ -208,10 +208,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             self.sig2,
             self.sig3,
             self.sig4,
-            models.MultiCliqueSignatory(public_key="pk5"),
-            models.MultiCliqueSignatory(public_key="pk6", name="sig6"),
+            models.MultiCliqueSignatory(address="pk5"),
+            models.MultiCliqueSignatory(address="pk6", name="sig6"),
         ]
-        self.assertModelsEqual(models.MultiCliqueSignatory.objects.order_by("public_key"), expected_sigs)
+        self.assertModelsEqual(models.MultiCliqueSignatory.objects.order_by("address"), expected_sigs)
 
     def test_multiclique_account_create_existing_account(self):
         expected_res = {
@@ -219,10 +219,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL_3",
             "signatories": [
-                {"public_key": "pk1", "name": "sig1"},
-                {"public_key": "pk2", "name": "sig2"},
-                {"public_key": "pk3", "name": "sig3"},
-                {"public_key": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "sig1"},
+                {"address": "pk2", "name": "sig2"},
+                {"address": "pk3", "name": "sig3"},
+                {"address": "pk4", "name": "sig4"},
             ],
             "default_threshold": 3,
         }
@@ -245,10 +245,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "pOl_ 3",
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                     "default_threshold": 3,
                 },
@@ -279,10 +279,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL2",
             "signatories": [
-                {"public_key": "pk1", "name": "sig1"},
-                {"public_key": "pk2", "name": "sig2"},
-                {"public_key": "pk3", "name": "sig3"},
-                {"public_key": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "sig1"},
+                {"address": "pk2", "name": "sig2"},
+                {"address": "pk3", "name": "sig3"},
+                {"address": "pk4", "name": "sig4"},
             ],
             "default_threshold": 3,
         }
@@ -295,10 +295,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "POL2",
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                     "default_threshold": 3,
                 },
@@ -320,10 +320,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "address": "addr2",
                     "policy": "POL2",
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                     "default_threshold": 3,
                 },
@@ -411,10 +411,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
             "signatories": [
-                {"public_key": "pk1", "name": "sig1"},
-                {"public_key": "pk2", "name": "sig2"},
-                {"public_key": "pk3", "name": "sig3"},
-                {"public_key": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "sig1"},
+                {"address": "pk2", "name": "sig2"},
+                {"address": "pk3", "name": "sig3"},
+                {"address": "pk4", "name": "sig4"},
             ],
         }
 
@@ -470,10 +470,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                 },
                 {
@@ -490,10 +490,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                 },
             ]
@@ -525,10 +525,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
                     "signatories": [
-                        {"public_key": "pk1", "name": "sig1"},
-                        {"public_key": "pk2", "name": "sig2"},
-                        {"public_key": "pk3", "name": "sig3"},
-                        {"public_key": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk2", "name": "sig2"},
+                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk4", "name": "sig4"},
                     ],
                 },
             ]
@@ -565,10 +565,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
             "signatories": [
-                {"public_key": "pk1", "name": "sig1"},
-                {"public_key": "pk2", "name": "sig2"},
-                {"public_key": "pk3", "name": "sig3"},
-                {"public_key": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "sig1"},
+                {"address": "pk2", "name": "sig2"},
+                {"address": "pk3", "name": "sig3"},
+                {"address": "pk4", "name": "sig4"},
             ],
         }
 

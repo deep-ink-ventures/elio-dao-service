@@ -87,7 +87,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
 
     def get_queryset(self):
         return self.queryset.select_related("policy").prefetch_related(
-            Prefetch("signatories", queryset=models.MultiCliqueSignatory.objects.order_by("public_key"))
+            Prefetch("signatories", queryset=models.MultiCliqueSignatory.objects.order_by("address"))
         )
 
     @swagger_auto_schema(
