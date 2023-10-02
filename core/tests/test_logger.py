@@ -34,6 +34,14 @@ class LoggerTest(UnitTestCase):
                         "title": "assets_wasm_hash",
                         "value": settings.ASSETS_WASM_HASH,
                     },
+                    {
+                        "title": "multiclique_wasm_hash",
+                        "value": settings.MULTICLIQUE_WASM_HASH,
+                    },
+                    {
+                        "title": "policy_wasm_hash",
+                        "value": settings.POLICY_WASM_HASH,
+                    },
                     {"title": "blockchain_url", "value": settings.BLOCKCHAIN_URL},
                     {"title": "network_passphrase", "value": settings.NETWORK_PASSPHRASE},
                 ]

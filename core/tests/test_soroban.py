@@ -463,6 +463,8 @@ class SorobanTest(IntegrationTestCase):
                 "assets_wasm_hash": "e",
                 "blockchain_url": "f",
                 "network_passphrase": "g",
+                "multiclique_wasm_hash": "h",
+                "policy_wasm_hash": "i",
             }
         )
 
@@ -486,6 +488,8 @@ class SorobanTest(IntegrationTestCase):
                 "assets_wasm_hash": "some_assets_wasm_hash",
                 "blockchain_url": "some_blockchain_url",
                 "network_passphrase": "some_network_passphrase",
+                "multiclique_wasm_hash": "some_multiclique_wasm_hash",
+                "policy_wasm_hash": "some_policy_wasm_hash",
             },
         )
         slack_logger.info.assert_called_once_with(
@@ -506,6 +510,8 @@ class SorobanTest(IntegrationTestCase):
                 "assets_wasm_hash": "e",
                 "blockchain_url": "f",
                 "network_passphrase": "g",
+                "multiclique_wasm_hash": "h",
+                "policy_wasm_hash": "i",
             },
         ),
         # no input, existing cache
@@ -525,6 +531,8 @@ class SorobanTest(IntegrationTestCase):
                 "assets_wasm_hash": 3,
                 "blockchain_url": 4,
                 "network_passphrase": "g",
+                "multiclique_wasm_hash": "h",
+                "policy_wasm_hash": "i",
             },
         ),
         # input overwrites cache
@@ -547,6 +555,8 @@ class SorobanTest(IntegrationTestCase):
                 "assets_wasm_hash": 3,
                 "blockchain_url": 4,
                 "network_passphrase": "g",
+                "multiclique_wasm_hash": "h",
+                "policy_wasm_hash": "i",
             },
         ),
     )
@@ -564,6 +574,8 @@ class SorobanTest(IntegrationTestCase):
             ASSETS_WASM_HASH="e",
             BLOCKCHAIN_URL="f",
             NETWORK_PASSPHRASE="g",
+            MULTICLIQUE_WASM_HASH="h",
+            POLICY_WASM_HASH="i",
         ):
             res = soroban_service.set_config(data=input_data)
 
@@ -910,6 +922,8 @@ class SorobanTest(IntegrationTestCase):
             "assets_wasm_hash": "some_assets_wasm_hash",
             "blockchain_url": "some_blockchain_url",
             "network_passphrase": "some_network_passphrase",
+            "multiclique_wasm_hash": "some_multiclique_wasm_hash",
+            "policy_wasm_hash": "some_policy_wasm_hash",
         }
         soroban_service.set_config(
             data={

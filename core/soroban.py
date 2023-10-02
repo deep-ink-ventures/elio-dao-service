@@ -560,6 +560,8 @@ class SorobanService(object):
             "multiclique_contract_address": settings.MULTICLIQUE_CONTRACT_ADDRESS,
             "policy_contract_address": settings.POLICY_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "multiclique_wasm_hash": settings.MULTICLIQUE_WASM_HASH,
+            "policy_wasm_hash": settings.POLICY_WASM_HASH,
             "blockchain_url": settings.BLOCKCHAIN_URL,
             "network_passphrase": settings.NETWORK_PASSPHRASE,
             **(cache.get("soroban_config") or {}),

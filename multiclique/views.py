@@ -26,54 +26,52 @@ from core.view_utils import (
 from multiclique import models, serializers
 from multiclique.serializers import InstallAccountAndPolicySerializer
 
-MULTICLIQUE_WASM = "8765a46f3e4030828ffe42ec0b131084516b6c0abc4b02ff938f58e773ab0239"
-ELIO_PRESET_WASM = "31c00a0582d7263786e3ec3187bbb067f208cbc68fb799965bd9523614566d8e"
-
 
 @api_view(["POST"])
 def install_account_and_policy(request):
     from core.soroban import soroban_service
 
+    config = soroban_service.set_config()
+
     if request.method == "POST":
         serializer = InstallAccountAndPolicySerializer(data=request.data)
-        if serializer.is_valid():
-            source_account = serializer.data["source"]
-            source = soroban_service.soroban.load_account(source_account)
-            policy_preset = serializer.data["policy_preset"]
+        serializer.is_valid(raise_exception=True)
+        source_account = serializer.data["source"]
+        source = soroban_service.soroban.load_account(source_account)
+        policy_preset = serializer.data["policy_preset"]
 
-            core_salt = os.urandom(32)
-            tx = (
-                TransactionBuilder(source, settings.NETWORK_PASSPHRASE)
-                .set_timeout(300)
-                .append_create_contract_op(wasm_id=MULTICLIQUE_WASM, address=source_account, salt=core_salt)
-            )
+        core_salt = os.urandom(32)
+        tx = (
+            TransactionBuilder(source_account=source, network_passphrase=config["network_passphrase"])
+            .set_timeout(300)
+            .append_create_contract_op(wasm_id=config["multiclique_wasm_hash"], address=source_account, salt=core_salt)
+        )
 
-            core_envelope = tx.build()
-            try:
-                core_envelope = soroban_service.soroban.prepare_transaction(core_envelope)
-            except PrepareTransactionException:
-                return Response({"error": "Unable to prepare transaction"}, status=status.HTTP_400_BAD_REQUEST)
+        core_envelope = tx.build()
+        try:
+            core_envelope = soroban_service.soroban.prepare_transaction(core_envelope)
+        except PrepareTransactionException:
+            return Response({"error": "Unable to prepare transaction"}, status=status.HTTP_400_BAD_REQUEST)
 
-            tx = TransactionBuilder(source, settings.NETWORK_PASSPHRASE).set_timeout(300)
+        tx = TransactionBuilder(source_account=source, network_passphrase=config["network_passphrase"]).set_timeout(300)
 
-            preset_salt = os.urandom(32)
-            if policy_preset == "ELIO_DAO":
-                tx.append_create_contract_op(wasm_id=ELIO_PRESET_WASM, address=source_account, salt=preset_salt)
+        preset_salt = os.urandom(32)
+        if policy_preset == "ELIO_DAO":
+            tx.append_create_contract_op(wasm_id=config["policy_wasm_hash"], address=source_account, salt=preset_salt)
 
-            policy_envelope = tx.build()
-            try:
-                policy_envelope = soroban_service.soroban.prepare_transaction(policy_envelope)
-            except PrepareTransactionException:
-                return Response({"error": "Unable to prepare transaction"}, status=status.HTTP_400_BAD_REQUEST)
+        policy_envelope = tx.build()
+        try:
+            policy_envelope = soroban_service.soroban.prepare_transaction(policy_envelope)
+        except PrepareTransactionException:
+            return Response({"error": "Unable to prepare transaction"}, status=status.HTTP_400_BAD_REQUEST)
 
-            return Response(
-                {
-                    "core_xdr": core_envelope.to_xdr(),
-                    "policy_xdr": policy_envelope.to_xdr(),
-                },
-                status=status.HTTP_200_OK,
-            )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        return Response(
+            {
+                "core_xdr": core_envelope.to_xdr(),
+                "policy_xdr": policy_envelope.to_xdr(),
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, SearchableMixin):

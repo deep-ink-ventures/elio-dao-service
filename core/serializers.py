@@ -18,6 +18,8 @@ class UpdateConfigSerializer(Serializer):  # noqa
     core_contract_address = CharField(required=False)
     votes_contract_address = CharField(required=False)
     assets_wasm_hash = CharField(required=False)
+    multiclique_wasm_hash = CharField(required=False)
+    policy_wasm_hash = CharField(required=False)
     blockchain_url = CharField(required=False)
     network_passphrase = CharField(required=False)
 
@@ -33,6 +35,8 @@ class ConfigSerializer(Serializer):  # noqa
     core_contract_address = CharField()
     votes_contract_address = CharField()
     assets_wasm_hash = CharField()
+    multiclique_wasm_hash = CharField()
+    policy_wasm_hash = CharField()
     blockchain_url = CharField()
     network_passphrase = CharField()
     current_block_number = IntegerField(allow_null=True, required=False)

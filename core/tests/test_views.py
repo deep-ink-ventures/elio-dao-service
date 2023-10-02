@@ -157,6 +157,8 @@ class CoreViewSetTest(IntegrationTestCase):
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
+            "multiclique_wasm_hash": settings.MULTICLIQUE_WASM_HASH,
+            "policy_wasm_hash": settings.POLICY_WASM_HASH,
             "blockchain_url": settings.BLOCKCHAIN_URL,
             "network_passphrase": settings.NETWORK_PASSPHRASE,
             "current_block_number": 123,
