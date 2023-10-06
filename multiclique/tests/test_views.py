@@ -1,6 +1,6 @@
 import base64
 from collections.abc import Collection
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, Mock, patch
 
 from ddt import data, ddt
 from django.core.cache import cache
@@ -26,17 +26,21 @@ from multiclique import models
 class MultiCliqueViewSetTest(IntegrationTestCase):
     def setUp(self):
         super().setUp()
-        self.sig1 = models.MultiCliqueSignatory.objects.create(address="pk1", name="sig1")
-        self.sig2 = models.MultiCliqueSignatory.objects.create(address="pk2", name="sig2")
-        self.sig3 = models.MultiCliqueSignatory.objects.create(address="pk3", name="sig3")
-        self.sig4 = models.MultiCliqueSignatory.objects.create(address="pk4", name="sig4")
+        self.signer1 = models.MultiCliqueSignatory.objects.create(address="pk1", name="signer1")
+        self.signer2 = models.MultiCliqueSignatory.objects.create(address="pk2", name="signer2")
+        self.signer3 = models.MultiCliqueSignatory.objects.create(address="pk3", name="signer3")
+        self.signer4 = models.MultiCliqueSignatory.objects.create(address="pk4", name="signer4")
+        self.sig1 = models.MultiCliqueSignature.objects.create(signatory=self.signer1, signature="sig1")
+        self.sig2 = models.MultiCliqueSignature.objects.create(signatory=self.signer2, signature="sig2")
+        self.sig3 = models.MultiCliqueSignature.objects.create(signatory=self.signer3, signature="sig3")
+        self.sig4 = models.MultiCliqueSignature.objects.create(signatory=self.signer4, signature="sig4")
         self.pol1 = models.MultiCliquePolicy.objects.create(name="POL1", active=True)
         self.pol2 = models.MultiCliquePolicy.objects.create(name="POL2", active=False)
         self.mc1 = models.MultiCliqueAccount(address="addr1", name="acc1", policy=self.pol1, default_threshold=2)
-        self.mc1.signatories.set([self.sig1, self.sig2, self.sig3, self.sig4])
+        self.mc1.signatories.set([self.signer1, self.signer2, self.signer3, self.signer4])
         self.mc1.save()
         self.mc2 = models.MultiCliqueAccount(address="addr2", name="acc2", policy=self.pol2, default_threshold=2)
-        self.mc2.signatories.set([self.sig2, self.sig3])
+        self.mc2.signatories.set([self.signer2, self.signer3])
         self.mc2.save()
         self.txn1 = models.MultiCliqueTransaction.objects.create(
             multiclique_account=self.mc1,
@@ -44,20 +48,26 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             preimage_hash="hash1",
             call_func="func1",
             call_args=["arg1"],
-            approvers=["addr1"],
-            status=models.TransactionStatus.EXECUTED,
-            executed_at=now(),
+            nonce=1,
+            ledger=1,
+            status=models.TransactionStatus.PENDING,
         )
+        self.txn1.approvals.set([self.sig1])
+        self.txn1.rejections.set([self.sig2, self.sig3])
+        self.txn1.save()
         self.txn2 = models.MultiCliqueTransaction.objects.create(
             multiclique_account=self.mc2,
             xdr="xdr2",
             preimage_hash="hash2",
             call_func="func2",
             call_args=["arg2"],
-            approvers=["addr2"],
+            nonce=2,
+            ledger=2,
             status=models.TransactionStatus.EXECUTABLE,
             executed_at=now(),
         )
+        self.txn2.approvals.set([self.sig2, self.sig4])
+        self.txn2.save()
 
     @staticmethod
     def wrap_in_pagination_res(results: Collection) -> dict:
@@ -67,16 +77,109 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     def fmt_dt(value):
         return DateTimeField().to_representation(value=value)
 
+    @patch("core.soroban.soroban_service.create_install_contract_transaction")
+    def test_create_multiclique_contract_xdr(self, create_install_contract_transaction_mock):
+        envelope = Mock()
+        envelope.to_xdr.return_value = "xdr"
+        create_install_contract_transaction_mock.return_value = envelope
+
+        with self.assertNumQueries(0):
+            res = self.client.post(
+                reverse("multiclique-contracts-create-multiclique-contract-xdr"),
+                data={"source_account_address": "addr1"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
+        self.assertDictEqual(res.json(), {"xdr": "xdr"})
+        create_install_contract_transaction_mock.assert_called_once_with(
+            source_account_address="addr1",
+            wasm_id="some_multiclique_wasm_hash",
+        )
+
+    @patch("core.soroban.soroban_service.create_install_contract_transaction")
+    def test_create_multiclique_contract_xdr_error(self, create_install_contract_transaction_mock):
+        from core.soroban import SorobanException
+
+        create_install_contract_transaction_mock.side_effect = SorobanException("roar")
+
+        with self.assertNumQueries(0):
+            res = self.client.post(
+                reverse("multiclique-contracts-create-multiclique-contract-xdr"),
+                data={"source_account_address": "addr1"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
+        self.assertDictEqual(res.json(), {"error": "Unable to prepare transaction"})
+        create_install_contract_transaction_mock.assert_called_once_with(
+            source_account_address="addr1",
+            wasm_id="some_multiclique_wasm_hash",
+        )
+
+    @patch("core.soroban.soroban_service.create_install_contract_transaction")
+    def test_create_policy_contract_xdr(self, create_install_contract_transaction_mock):
+        envelope = Mock()
+        envelope.to_xdr.return_value = "xdr"
+        create_install_contract_transaction_mock.return_value = envelope
+
+        with self.assertNumQueries(0):
+            res = self.client.post(
+                reverse("multiclique-contracts-create-policy-contract-xdr"),
+                data={"source_account_address": "addr1", "policy_preset": "ELIO_DAO"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
+        self.assertDictEqual(res.json(), {"xdr": "xdr"})
+        create_install_contract_transaction_mock.assert_called_once_with(
+            source_account_address="addr1",
+            wasm_id="some_policy_wasm_hash",
+        )
+
+    @patch("core.soroban.soroban_service.create_install_contract_transaction")
+    def test_create_policy_contract_xdr_invalid_policy_preset(self, create_install_contract_transaction_mock):
+        with self.assertNumQueries(0):
+            res = self.client.post(
+                reverse("multiclique-contracts-create-policy-contract-xdr"),
+                data={"source_account_address": "addr1", "policy_preset": "not elio"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
+        self.assertDictEqual(res.json(), {"policy_preset": ['currently only "ELIO_DAO" is supported as policy preset']})
+        create_install_contract_transaction_mock.assert_not_called()
+
+    @patch("core.soroban.soroban_service.create_install_contract_transaction")
+    def test_create_policy_contract_xdr_error(self, create_install_contract_transaction_mock):
+        from core.soroban import SorobanException
+
+        create_install_contract_transaction_mock.side_effect = SorobanException("roar")
+
+        with self.assertNumQueries(0):
+            res = self.client.post(
+                reverse("multiclique-contracts-create-policy-contract-xdr"),
+                data={"source_account_address": "addr1", "policy_preset": "ELIO_DAO"},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
+        self.assertDictEqual(res.json(), {"error": "Unable to prepare transaction"})
+        create_install_contract_transaction_mock.assert_called_once_with(
+            source_account_address="addr1",
+            wasm_id="some_policy_wasm_hash",
+        )
+
     def test_multiclique_account_get(self):
         expected_res = {
             "address": "addr1",
             "name": "acc1",
             "policy": "POL1",
             "signatories": [
-                {"address": "pk1", "name": "sig1"},
-                {"address": "pk2", "name": "sig2"},
-                {"address": "pk3", "name": "sig3"},
-                {"address": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
             ],
             "default_threshold": 2,
         }
@@ -95,10 +198,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "POL1",
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                     "default_threshold": 2,
                 },
@@ -107,8 +210,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc2",
                     "policy": "POL2",
                     "signatories": [
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
                     ],
                     "default_threshold": 2,
                 },
@@ -131,10 +234,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     def test_multiclique_account_list_filter(self, case):
         _filter, expected_res = case
         mc3 = models.MultiCliqueAccount(address="addr3", name="acc3", policy=self.pol1, default_threshold=2)
-        mc3.signatories.set([self.sig1])
+        mc3.signatories.set([self.signer1])
         mc3.save()
         mc4 = models.MultiCliqueAccount(address="addr4", name="acc4", policy=self.pol1, default_threshold=2)
-        mc4.signatories.set([self.sig4, self.sig1])
+        mc4.signatories.set([self.signer4, self.signer1])
         mc4.save()
 
         with self.assertNumQueries(3):
@@ -149,10 +252,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL_3",
             "signatories": [
-                {"address": "pk1", "name": "sig1"},
-                {"address": "pk2", "name": "sig2"},
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
                 {"address": "pk5", "name": None},  # new
-                {"address": "pk6", "name": "sig6"},  # new
+                {"address": "pk6", "name": "signer6"},  # new
             ],
             "default_threshold": 3,
         }
@@ -165,10 +268,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "pOl_ 3",
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
+                        {"address": "pk1", "name": "signer1"},
                         {"address": "pk2"},
                         {"address": "pk5"},
-                        {"address": "pk6", "name": "sig6"},
+                        {"address": "pk6", "name": "signer6"},
                     ],
                     "default_threshold": 3,
                 },
@@ -193,8 +296,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertModelsEqual(
             mc3.signatories.all(),
             [
-                self.sig1,
-                self.sig2,
+                self.signer1,
+                self.signer2,
                 models.MultiCliqueSignatory.objects.get(address="pk5"),
                 models.MultiCliqueSignatory.objects.get(address="pk6"),
             ],
@@ -204,12 +307,12 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             [self.mc1, self.mc2, mc3],
         )
         expected_sigs = [
-            self.sig1,
-            self.sig2,
-            self.sig3,
-            self.sig4,
+            self.signer1,
+            self.signer2,
+            self.signer3,
+            self.signer4,
             models.MultiCliqueSignatory(address="pk5"),
-            models.MultiCliqueSignatory(address="pk6", name="sig6"),
+            models.MultiCliqueSignatory(address="pk6", name="signer6"),
         ]
         self.assertModelsEqual(models.MultiCliqueSignatory.objects.order_by("address"), expected_sigs)
 
@@ -219,10 +322,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL_3",
             "signatories": [
-                {"address": "pk1", "name": "sig1"},
-                {"address": "pk2", "name": "sig2"},
-                {"address": "pk3", "name": "sig3"},
-                {"address": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
             ],
             "default_threshold": 3,
         }
@@ -234,7 +337,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 "default_threshold": 2,
             }
         )
-        mc3.signatories.set([self.sig1, self.sig2, self.sig3, self.sig4])
+        mc3.signatories.set([self.signer1, self.signer2, self.signer3, self.signer4])
         mc3.save()
 
         with self.assertNumQueries(14):
@@ -245,10 +348,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "pOl_ 3",
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                     "default_threshold": 3,
                 },
@@ -270,7 +373,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             ),
             ignore_fields=("created_at", "updated_at", "signatories"),
         )
-        self.assertModelsEqual(mc3.signatories.all(), [self.sig1, self.sig2, self.sig3, self.sig4])
+        self.assertModelsEqual(mc3.signatories.all(), [self.signer1, self.signer2, self.signer3, self.signer4])
         self.assertModelsEqual(models.MultiCliqueAccount.objects.order_by("address"), [self.mc1, self.mc2, mc3])
 
     def test_multiclique_account_create_existing_policy(self):
@@ -279,10 +382,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "name": "acc1",
             "policy": "POL2",
             "signatories": [
-                {"address": "pk1", "name": "sig1"},
-                {"address": "pk2", "name": "sig2"},
-                {"address": "pk3", "name": "sig3"},
-                {"address": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
             ],
             "default_threshold": 3,
         }
@@ -295,10 +398,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "name": "acc1",
                     "policy": "POL2",
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                     "default_threshold": 3,
                 },
@@ -320,10 +423,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "address": "addr2",
                     "policy": "POL2",
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                     "default_threshold": 3,
                 },
@@ -398,12 +501,18 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
 
     def test_multiclique_transaction_get(self):
         expected_res = {
+            "id": self.txn1.id,
             "xdr": self.txn1.xdr,
             "preimage_hash": self.txn1.preimage_hash,
             "call_func": self.txn1.call_func,
             "call_args": self.txn1.call_args,
-            "approvers": self.txn1.approvers,
-            "rejecters": self.txn1.rejecters,
+            "approvals": [
+                {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+            ],
+            "rejections": [
+                {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+                {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+            ],
             "status": self.txn1.status,
             "executed_at": self.fmt_dt(self.txn1.executed_at),
             "created_at": self.fmt_dt(self.txn1.created_at),
@@ -411,14 +520,14 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
             "signatories": [
-                {"address": "pk1", "name": "sig1"},
-                {"address": "pk2", "name": "sig2"},
-                {"address": "pk3", "name": "sig3"},
-                {"address": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
             ],
         }
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(7):
             res = self.client.get(
                 reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
@@ -457,12 +566,18 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = self.wrap_in_pagination_res(
             [
                 {
+                    "id": self.txn1.id,
                     "xdr": self.txn1.xdr,
                     "preimage_hash": self.txn1.preimage_hash,
                     "call_func": self.txn1.call_func,
                     "call_args": self.txn1.call_args,
-                    "approvers": self.txn1.approvers,
-                    "rejecters": self.txn1.rejecters,
+                    "approvals": [
+                        {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                    ],
+                    "rejections": [
+                        {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+                        {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                    ],
                     "status": self.txn1.status,
                     "executed_at": self.fmt_dt(self.txn1.executed_at),
                     "created_at": self.fmt_dt(self.txn1.created_at),
@@ -470,19 +585,23 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                 },
                 {
+                    "id": self.txn2.id,
                     "xdr": self.txn2.xdr,
                     "preimage_hash": self.txn2.preimage_hash,
                     "call_func": self.txn2.call_func,
                     "call_args": self.txn2.call_args,
-                    "approvers": self.txn2.approvers,
-                    "rejecters": self.txn2.rejecters,
+                    "approvals": [
+                        {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+                        {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+                    ],
+                    "rejections": [],
                     "status": self.txn2.status,
                     "executed_at": self.fmt_dt(self.txn2.executed_at),
                     "created_at": self.fmt_dt(self.txn2.created_at),
@@ -490,16 +609,16 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                 },
             ]
         )
 
-        with self.assertNumQueries(4):
+        with self.assertNumQueries(8):
             res = self.client.get(
                 reverse("multiclique-transactions-list"),
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
@@ -512,12 +631,18 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = self.wrap_in_pagination_res(
             [
                 {
+                    "id": self.txn1.id,
                     "xdr": self.txn1.xdr,
                     "preimage_hash": self.txn1.preimage_hash,
                     "call_func": self.txn1.call_func,
                     "call_args": self.txn1.call_args,
-                    "approvers": self.txn1.approvers,
-                    "rejecters": self.txn1.rejecters,
+                    "approvals": [
+                        {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                    ],
+                    "rejections": [
+                        {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+                        {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                    ],
                     "status": self.txn1.status,
                     "executed_at": self.fmt_dt(self.txn1.executed_at),
                     "created_at": self.fmt_dt(self.txn1.created_at),
@@ -525,16 +650,16 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "multiclique_address": self.mc1.address,
                     "default_threshold": self.mc1.default_threshold,
                     "signatories": [
-                        {"address": "pk1", "name": "sig1"},
-                        {"address": "pk2", "name": "sig2"},
-                        {"address": "pk3", "name": "sig3"},
-                        {"address": "pk4", "name": "sig4"},
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
                     ],
                 },
             ]
         )
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(8):
             res = self.client.get(
                 reverse("multiclique-transactions-list"),
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
@@ -543,49 +668,49 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
-    @patch("core.soroban.soroban_service.analyze_xdr")
-    def test_multiclique_transaction_create(self, analyze_xdr_mock):
-        analyze_xdr_mock.return_value = {
+    @patch("core.soroban.soroban_service.analyze_transaction")
+    def test_multiclique_transaction_create(self, analyze_transaction_mock):
+        analyze_transaction_mock.return_value = {
             "source_acc": "source_acc",
             "contract_address": "contract_addr",
             "func_name": "call_func3",
             "func_args": ["call_arg3"],
-            "signers": ["addr1", "addr3"],
             "preimage_hash": "hash3",
+            "nonce": 3,
+            "ledger": 3,
         }
         expected_res = {
             "xdr": "xdr3",
             "preimage_hash": "hash3",
             "call_func": "call_func3",
             "call_args": ["call_arg3"],
-            "approvers": ["addr1", "addr3"],
-            "rejecters": [],
-            "status": models.TransactionStatus.EXECUTABLE,
+            "approvals": [],
+            "rejections": [],
+            "status": models.TransactionStatus.PENDING,
             "executed_at": None,
             "multiclique_address": self.mc1.address,
             "default_threshold": self.mc1.default_threshold,
             "signatories": [
-                {"address": "pk1", "name": "sig1"},
-                {"address": "pk2", "name": "sig2"},
-                {"address": "pk3", "name": "sig3"},
-                {"address": "pk4", "name": "sig4"},
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
             ],
         }
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             res = self.client.post(
                 reverse("multiclique-transactions-list"),
-                data={
-                    "xdr": "xdr3",
-                    "multiclique_address": self.mc1.address,
-                },
+                data={"xdr": "xdr3"},
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
         self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
         txn = models.MultiCliqueTransaction.objects.get(xdr="xdr3")
-        expected_res.update({"updated_at": self.fmt_dt(txn.updated_at), "created_at": self.fmt_dt(txn.created_at)})
+        expected_res.update(
+            {"id": txn.id, "updated_at": self.fmt_dt(txn.updated_at), "created_at": self.fmt_dt(txn.created_at)}
+        )
         self.assertDictEqual(res.json(), expected_res)
         self.assertModelsEqual(
             models.MultiCliqueTransaction.objects.order_by("xdr"),
@@ -598,21 +723,23 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                         "preimage_hash": "hash3",
                         "call_func": "call_func3",
                         "call_args": ["call_arg3"],
-                        "approvers": ["addr1", "addr3"],
-                        "rejecters": [],
-                        "status": models.TransactionStatus.EXECUTABLE,
+                        "nonce": 3,
+                        "ledger": 3,
+                        "status": models.TransactionStatus.PENDING,
                         "executed_at": None,
                         "multiclique_account": self.mc1,
                     }
                 ),
             ],
-            ignore_fields=("id", "created_at", "updated_at"),
+            ignore_fields=("id", "approvals", "rejections", "created_at", "updated_at"),
         )
+        self.assertModelsEqual(list(txn.approvals.all()), [])
+        self.assertListEqual(list(txn.rejections.all()), [])
 
-    @patch("core.soroban.soroban_service.analyze_xdr")
-    def test_multiclique_transaction_create_invalid_xdr(self, analyze_xdr_mock):
-        analyze_xdr_mock.side_effect = InvalidXDRException(ctx={"some": "ctx"})
-        expected_res = {"error": "The XDR is invalid.", "ctx": {"some": "ctx"}}
+    @patch("core.soroban.soroban_service.analyze_transaction")
+    def test_multiclique_transaction_create_invalid_xdr(self, analyze_transaction_mock):
+        analyze_transaction_mock.side_effect = InvalidXDRException(ctx={"some": "ctx"})
+        expected_res = {"error": "The XDR is invalid."}
 
         with self.assertNumQueries(0):
             res = self.client.post(
@@ -629,21 +756,169 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.json(), expected_res)
         self.assertModelsEqual(models.MultiCliqueTransaction.objects.all(), [self.txn1, self.txn2])
 
-    @patch("core.soroban.soroban_service.analyze_xdr")
-    def test_multiclique_transaction_create_missing_multiclique_acc(self, _mock):
-        expected_res = {"error": "MultiCliqueAccount does not exist."}
+    @patch("core.soroban.soroban_service.authorize_transaction")
+    @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.soroban_service.create_signature_data")
+    def test_multiclique_transaction_patch_executable(
+        self, authorize_transaction_mock, prepare_transaction_mock, create_signature_data_mock
+    ):
+        envelope_1 = Mock()
+        envelope_2 = Mock()
+        envelope_2.to_xdr.return_value = "new_xdr"
+        create_signature_data_mock.return_value = {"signature": "data"}
+        authorize_transaction_mock.return_value = envelope_1
+        prepare_transaction_mock.return_value = envelope_2
+        expected_res = {
+            "id": self.txn1.id,
+            "xdr": "new_xdr",
+            "preimage_hash": self.txn1.preimage_hash,
+            "call_func": self.txn1.call_func,
+            "call_args": self.txn1.call_args,
+            "approvals": [
+                {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+            ],
+            "rejections": [
+                {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+            ],
+            "status": models.TransactionStatus.EXECUTABLE,
+            "executed_at": self.fmt_dt(self.txn1.executed_at),
+            "created_at": self.fmt_dt(self.txn1.created_at),
+            "multiclique_address": self.mc1.address,
+            "default_threshold": self.mc1.default_threshold,
+            "signatories": [
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
+            ],
+        }
 
-        with self.assertNumQueries(1):
-            res = self.client.post(
-                reverse("multiclique-transactions-list"),
+        with self.assertNumQueries(21):
+            res = self.client.patch(
+                reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
                 data={
-                    "xdr": "xdr3",
-                    "multiclique_address": "wrong addr",
+                    "approvals": [
+                        {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                        {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+                    ]
                 },
                 content_type="application/json",
                 HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
             )
 
-        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.txn1.refresh_from_db()
+        expected_res.update({"updated_at": self.fmt_dt(self.txn1.updated_at)})
         self.assertDictEqual(res.json(), expected_res)
-        self.assertModelsEqual(models.MultiCliqueTransaction.objects.all(), [self.txn1, self.txn2])
+        self.assertModelsEqual(
+            models.MultiCliqueTransaction.objects.order_by("xdr"),
+            [
+                models.MultiCliqueTransaction(
+                    **{
+                        "id": self.txn1.id,
+                        "xdr": "new_xdr",
+                        "preimage_hash": self.txn1.preimage_hash,
+                        "call_func": self.txn1.call_func,
+                        "call_args": self.txn1.call_args,
+                        "nonce": self.txn1.nonce,
+                        "ledger": self.txn1.ledger,
+                        "updated_at": self.txn1.updated_at,
+                        "created_at": self.txn1.created_at,
+                        "status": models.TransactionStatus.EXECUTABLE,
+                        "executed_at": None,
+                        "multiclique_account": self.mc1,
+                    }
+                ),
+                self.txn2,
+            ],
+            ignore_fields=("approvals", "rejections"),
+        )
+        self.assertModelsEqual(self.txn1.approvals.all(), [self.sig1, self.sig3, self.sig4])
+        self.assertModelsEqual(self.txn1.rejections.all(), [self.sig2])
+
+    @patch("core.soroban.soroban_service.authorize_transaction")
+    @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.soroban_service.create_signature_data")
+    def test_multiclique_transaction_patch_rejected(
+        self, authorize_transaction_mock, prepare_transaction_mock, create_signature_data_mock
+    ):
+        envelope_1 = Mock()
+        envelope_2 = Mock()
+        envelope_2.to_xdr.return_value = "new_xdr"
+        create_signature_data_mock.return_value = {"signature": "data"}
+        authorize_transaction_mock.return_value = envelope_1
+        prepare_transaction_mock.return_value = envelope_2
+        expected_res = {
+            "id": self.txn1.id,
+            "xdr": self.txn1.xdr,
+            "preimage_hash": self.txn1.preimage_hash,
+            "call_func": self.txn1.call_func,
+            "call_args": self.txn1.call_args,
+            "approvals": [
+                {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+            ],
+            "rejections": [
+                {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+            ],
+            "status": models.TransactionStatus.REJECTED,
+            "executed_at": self.fmt_dt(self.txn1.executed_at),
+            "created_at": self.fmt_dt(self.txn1.created_at),
+            "multiclique_address": self.mc1.address,
+            "default_threshold": self.mc1.default_threshold,
+            "signatories": [
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
+            ],
+        }
+
+        with self.assertNumQueries(24):
+            res = self.client.patch(
+                reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
+                data={
+                    "approvals": [
+                        {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+                    ],
+                    "rejections": [
+                        {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                        {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+                    ],
+                },
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.txn1.refresh_from_db()
+        expected_res.update({"updated_at": self.fmt_dt(self.txn1.updated_at)})
+        self.assertDictEqual(res.json(), expected_res)
+        self.assertModelsEqual(
+            models.MultiCliqueTransaction.objects.order_by("xdr"),
+            [
+                models.MultiCliqueTransaction(
+                    **{
+                        "id": self.txn1.id,
+                        "xdr": self.txn1.xdr,
+                        "preimage_hash": self.txn1.preimage_hash,
+                        "call_func": self.txn1.call_func,
+                        "call_args": self.txn1.call_args,
+                        "nonce": self.txn1.nonce,
+                        "ledger": self.txn1.ledger,
+                        "updated_at": self.txn1.updated_at,
+                        "created_at": self.txn1.created_at,
+                        "status": models.TransactionStatus.REJECTED,
+                        "executed_at": None,
+                        "multiclique_account": self.mc1,
+                    }
+                ),
+                self.txn2,
+            ],
+            ignore_fields=("approvals", "rejections"),
+        )
+        self.assertModelsEqual(self.txn1.approvals.all(), [self.sig2])
+        self.assertModelsEqual(self.txn1.rejections.all(), [self.sig1, self.sig3, self.sig4])

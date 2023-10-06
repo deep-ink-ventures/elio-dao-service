@@ -8,9 +8,23 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from multiclique import models
 
 
-class InstallAccountAndPolicySerializer(serializers.Serializer):
-    source = serializers.CharField(max_length=56)
-    policy_preset = serializers.CharField()
+class CreateMultiCliqueContractSerializer(serializers.Serializer):
+    source_account_address = serializers.CharField(max_length=56)
+
+
+class CreatePolicyContractSerializer(serializers.Serializer):
+    source_account_address = serializers.CharField(max_length=56)
+    policy_preset = serializers.CharField(help_text='currently only supports "ELIO_DAO"')
+
+    @staticmethod
+    def validate_policy_preset(value):
+        if value != "ELIO_DAO":
+            raise ValidationError('currently only "ELIO_DAO" is supported as policy preset')
+        return value
+
+
+class MultiCliqueContractXDRSerializer(serializers.Serializer):
+    xdr = serializers.CharField()
 
 
 class MultiCliquePolicySerializer(ModelSerializer):
@@ -45,31 +59,28 @@ class MultiCliqueAccountSerializer(ModelSerializer):
         self.fields["policy"].validators.pop(0)
 
 
-class CreateMultiCliqueTransactionSerializer(Serializer):
-    xdr = CharField(required=True)
-    multiclique_address = CharField(required=True)
-
-    class Meta:
-        fields = (
-            "xdr",
-            "multiclique_address",
-        )
+class MultiCliqueSignatureSerializer(Serializer):
+    signature = CharField()
+    signatory = MultiCliqueSignatorySerializer()
 
 
 class MultiCliqueTransactionSerializer(ModelSerializer):
-    multiclique_address = CharField(source="multiclique_account.address")
-    default_threshold = IntegerField(source="multiclique_account.default_threshold")
-    signatories = MultiCliqueSignatorySerializer(many=True, source="multiclique_account.signatories")
+    multiclique_address = CharField(source="multiclique_account.address", read_only=True)
+    default_threshold = IntegerField(source="multiclique_account.default_threshold", read_only=True)
+    approvals = MultiCliqueSignatureSerializer(many=True)
+    rejections = MultiCliqueSignatureSerializer(many=True)
+    signatories = MultiCliqueSignatorySerializer(many=True, source="multiclique_account.signatories", read_only=True)
 
     class Meta:
         model = models.MultiCliqueTransaction
         fields = (
+            "id",
             "xdr",
             "preimage_hash",
             "call_func",
             "call_args",
-            "approvers",
-            "rejecters",
+            "approvals",
+            "rejections",
             "status",
             "executed_at",
             "created_at",
@@ -78,6 +89,86 @@ class MultiCliqueTransactionSerializer(ModelSerializer):
             "default_threshold",
             "signatories",
         )
+
+    @staticmethod
+    def _create_signatures(validated_data):
+        signatories = []
+        approvals = []
+        rejections = []
+        for entry in validated_data.pop("approvals", []):
+            signatory = models.MultiCliqueSignatory(
+                address=entry["signatory"]["address"], name=entry["signatory"].get("name")
+            )
+            signatories.append(signatory)
+            approvals.append(models.MultiCliqueSignature(signatory=signatory, signature=entry["signature"]))
+        for entry in validated_data.pop("rejections", []):
+            signatory = models.MultiCliqueSignatory(
+                address=entry["signatory"]["address"], name=entry["signatory"].get("name")
+            )
+            signatories.append(signatory)
+            rejections.append(models.MultiCliqueSignature(signatory=signatory, signature=entry["signature"]))
+
+        signatures = []
+        if approvals or rejections:
+            models.MultiCliqueSignatory.objects.bulk_create(signatories, ignore_conflicts=True)
+            signatures = models.MultiCliqueSignature.objects.bulk_create(
+                [*approvals, *rejections], ignore_conflicts=True
+            )
+
+        return signatures, len(approvals)
+
+    def create(self, validated_data):
+        validated_data["multiclique_account"] = self.initial_data["multiclique_account"]
+        validated_data["nonce"] = self.initial_data["nonce"]
+        validated_data["ledger"] = self.initial_data["ledger"]
+
+        signatures, approval_count = self._create_signatures(validated_data)
+        txn = models.MultiCliqueTransaction.objects.create(**validated_data)
+        if signatures:
+            if approval_count:
+                txn.approvals.set(signatures[:approval_count])
+            if len(signatures) > approval_count:
+                txn.rejections.set(signatures[approval_count:])
+            txn.save()
+
+        return txn
+
+    def update(self, instance, validated_data):
+        signatures, approval_count = self._create_signatures(validated_data)
+        if signatures:
+            if approval_count:
+                approvals = signatures[:approval_count]
+                instance.approvals.add(*approvals)
+                instance.rejections.through.objects.filter(
+                    multicliquesignature_id__in=[approval.pk for approval in approvals],
+                    multicliquetransaction_id=instance.id,
+                ).delete()
+            if len(signatures) > approval_count:
+                rejections = signatures[approval_count:]
+                instance.rejections.add(*rejections)
+                instance.approvals.through.objects.filter(
+                    multicliquesignature_id__in=[rejection.pk for rejection in rejections],
+                    multicliquetransaction_id=instance.id,
+                ).delete()
+
+        if validated_data:
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+
+        instance.save()
+        return instance
+
+
+class CreateMultiCliqueTransactionSerializer(Serializer):
+    xdr = CharField(required=True)
+
+    class Meta:
+        fields = ("xdr",)
+
+
+class UpdateMultiCliqueTransactionSerializer(Serializer):
+    approvals = MultiCliqueSignatureSerializer(many=True, required=False)
+    rejections = MultiCliqueSignatureSerializer(many=True, required=False)
 
 
 class SwaggerMultiCliqueAuthSerializer(Serializer):

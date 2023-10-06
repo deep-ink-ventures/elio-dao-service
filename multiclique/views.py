@@ -1,4 +1,5 @@
-import os
+import json
+import logging
 import re
 import secrets
 
@@ -8,15 +9,12 @@ from django.db import transaction
 from django.db.models import Prefetch
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
-from rest_framework import status
-from rest_framework.decorators import action, api_view
-from rest_framework.mixins import CreateModelMixin, UpdateModelMixin
+from rest_framework.decorators import action
+from rest_framework.mixins import CreateModelMixin
 from rest_framework.response import Response
 from rest_framework.status import HTTP_200_OK, HTTP_201_CREATED, HTTP_400_BAD_REQUEST
-from rest_framework.viewsets import ReadOnlyModelViewSet
+from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 from rest_framework_simplejwt.serializers import TokenRefreshSerializer
-from stellar_sdk import TransactionBuilder
-from stellar_sdk.exceptions import PrepareTransactionException
 
 from core.view_utils import (
     IsAuthenticated,
@@ -24,54 +22,70 @@ from core.view_utils import (
     SearchableMixin,
 )
 from multiclique import models, serializers
-from multiclique.serializers import InstallAccountAndPolicySerializer
+
+slack_logger = logging.getLogger("alerts.slack")
 
 
-@api_view(["POST"])
-def install_account_and_policy(request):
-    from core.soroban import soroban_service
+class MultiCliqueContractViewSet(GenericViewSet):
+    @swagger_auto_schema(
+        operation_id="Generate MultiClique Contract XDR",
+        operation_description="Generates XDR to create a MultiClique Contract instance",
+        request_body=serializers.CreateMultiCliqueContractSerializer,
+        responses={200: openapi.Response("", serializers.MultiCliqueContractXDRSerializer)},
+        security=[{"Basic": []}],
+    )
+    @action(
+        methods=["POST"],
+        detail=False,
+        url_path="create-multiclique-xdr",
+    )
+    def create_multiclique_contract_xdr(self, request, *args, **kwargs):
+        from core.soroban import SorobanException, soroban_service
 
-    config = soroban_service.set_config()
-
-    if request.method == "POST":
-        serializer = InstallAccountAndPolicySerializer(data=request.data)
+        serializer = serializers.CreateMultiCliqueContractSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        source_account = serializer.data["source"]
-        source = soroban_service.soroban.load_account(source_account)
-        policy_preset = serializer.data["policy_preset"]
 
-        core_salt = os.urandom(32)
-        tx = (
-            TransactionBuilder(source_account=source, network_passphrase=config["network_passphrase"])
-            .set_timeout(300)
-            .append_create_contract_op(wasm_id=config["multiclique_wasm_hash"], address=source_account, salt=core_salt)
-        )
-
-        core_envelope = tx.build()
         try:
-            core_envelope = soroban_service.soroban.prepare_transaction(core_envelope)
-        except PrepareTransactionException:
-            return Response({"error": "Unable to prepare transaction"}, status=status.HTTP_400_BAD_REQUEST)
+            xdr = soroban_service.create_install_contract_transaction(
+                source_account_address=serializer.data["source_account_address"],
+                wasm_id=soroban_service.set_config()["multiclique_wasm_hash"],
+            ).to_xdr()
+        except SorobanException:
+            return Response(data={"error": "Unable to prepare transaction"}, status=HTTP_400_BAD_REQUEST)
 
-        tx = TransactionBuilder(source_account=source, network_passphrase=config["network_passphrase"]).set_timeout(300)
+        serializer = serializers.MultiCliqueContractXDRSerializer(data={"xdr": xdr})
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=HTTP_201_CREATED)
 
-        preset_salt = os.urandom(32)
-        if policy_preset == "ELIO_DAO":
-            tx.append_create_contract_op(wasm_id=config["policy_wasm_hash"], address=source_account, salt=preset_salt)
+    @swagger_auto_schema(
+        operation_id="Generate Policy Contract XDR",
+        operation_description="Generates XDR to create a Policy Contract instance",
+        request_body=serializers.CreatePolicyContractSerializer,
+        responses={200: openapi.Response("", serializers.MultiCliqueContractXDRSerializer)},
+        security=[{"Basic": []}],
+    )
+    @action(
+        methods=["POST"],
+        detail=False,
+        url_path="create-policy-xdr",
+    )
+    def create_policy_contract_xdr(self, request, *args, **kwargs):
+        from core.soroban import SorobanException, soroban_service
 
-        policy_envelope = tx.build()
+        serializer = serializers.CreatePolicyContractSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
         try:
-            policy_envelope = soroban_service.soroban.prepare_transaction(policy_envelope)
-        except PrepareTransactionException:
-            return Response({"error": "Unable to prepare transaction"}, status=status.HTTP_400_BAD_REQUEST)
+            xdr = soroban_service.create_install_contract_transaction(
+                source_account_address=serializer.data["source_account_address"],
+                wasm_id=soroban_service.set_config()["policy_wasm_hash"],
+            ).to_xdr()
+        except SorobanException:
+            return Response(data={"error": "Unable to prepare transaction"}, status=HTTP_400_BAD_REQUEST)
 
-        return Response(
-            {
-                "core_xdr": core_envelope.to_xdr(),
-                "policy_xdr": policy_envelope.to_xdr(),
-            },
-            status=status.HTTP_200_OK,
-        )
+        serializer = serializers.MultiCliqueContractXDRSerializer(data={"xdr": xdr})
+        serializer.is_valid(raise_exception=True)
+        return Response(data=serializer.data, status=HTTP_201_CREATED)
 
 
 class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, SearchableMixin):
@@ -181,7 +195,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
         return Response(data=serializer.data, status=HTTP_200_OK)
 
 
-class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, UpdateModelMixin, SearchableMixin):
+class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, SearchableMixin):
     queryset = models.MultiCliqueTransaction.objects.all()
     serializer_class = serializers.MultiCliqueTransactionSerializer
     filter_fields = ["xdr", "multiclique_account__address"]
@@ -192,7 +206,9 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Upda
         return super().filter_queryset(queryset).filter(multiclique_account__address=self.request.user.id)
 
     def get_queryset(self):
-        return self.queryset.select_related("multiclique_account")
+        return self.queryset.prefetch_related(
+            "approvals__signatory", "rejections__signatory", "multiclique_account__signatories"
+        )
 
     @swagger_auto_schema(
         operation_id="Create MultiCliqueTransaction",
@@ -204,35 +220,70 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Upda
         security=[{"Bearer": []}],
     )
     def create(self, request, *args, **kwargs):
-        from core.soroban import InvalidXDRException, soroban_service
+        from core.soroban import SorobanException, soroban_service
 
         serializer = serializers.CreateMultiCliqueTransactionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.data
 
         try:
-            xdr_data = soroban_service.analyze_xdr(xdr=(xdr := data["xdr"]))
-        except InvalidXDRException as exc:
-            return Response(data={"error": exc.msg, "ctx": exc.ctx}, status=HTTP_400_BAD_REQUEST)
+            xdr_data = soroban_service.analyze_transaction(obj=(xdr := data["xdr"]))
+        except SorobanException as exc:
+            return Response(data={"error": exc.msg}, status=HTTP_400_BAD_REQUEST)
 
         try:
-            acc = models.MultiCliqueAccount.objects.get(address=data["multiclique_address"])
+            acc = models.MultiCliqueAccount.objects.get(address=request.user.id)
         except models.MultiCliqueAccount.DoesNotExist:
             return Response(data={"error": "MultiCliqueAccount does not exist."}, status=HTTP_400_BAD_REQUEST)
 
-        if len(signers := xdr_data["signers"]) == acc.default_threshold:
-            txn_status = models.TransactionStatus.EXECUTABLE
-        else:
-            txn_status = models.TransactionStatus.PENDING
-
-        txn = models.MultiCliqueTransaction.objects.create(
-            xdr=xdr,
-            multiclique_account=acc,
-            call_func=xdr_data["func_name"],
-            call_args=xdr_data["func_args"],
-            approvers=signers,
-            status=txn_status,
-            preimage_hash=xdr_data["preimage_hash"],
+        serializer = self.get_serializer(
+            data={
+                "xdr": xdr,
+                "multiclique_account": acc,
+                "nonce": xdr_data["nonce"],
+                "ledger": xdr_data["ledger"],
+                "call_func": xdr_data["func_name"],
+                "call_args": xdr_data["func_args"],
+                "preimage_hash": xdr_data["preimage_hash"],
+                "approvals": [],
+                "rejections": [],
+            }
         )
-        res_data = self.get_serializer(txn).data
+        if not serializer.is_valid():
+            slack_logger.error(f"{serializer.errors} ctx: {json.dumps(xdr_data)}")
+            return Response(data={"error": "Error during Transaction creation"}, status=HTTP_400_BAD_REQUEST)
+
+        serializer.save()
+        res_data = serializer.data
         return Response(data=res_data, status=HTTP_201_CREATED, headers=self.get_success_headers(data=res_data))
+
+    @swagger_auto_schema(
+        operation_id="Update MultiCliqueTransaction",
+        operation_description="Updates a MultiCliqueTransaction",
+        request_body=serializers.UpdateMultiCliqueTransactionSerializer,
+        responses={
+            201: openapi.Response("", serializers.MultiCliqueTransactionSerializer),
+        },
+        security=[{"Bearer": []}],
+    )
+    def partial_update(self, request, *args, **kwargs):
+        from core.soroban import SorobanException, update_transaction
+
+        serializer = serializers.UpdateMultiCliqueTransactionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.data
+
+        txn = self.get_object()
+        # serializer = self.get_serializer(instance=txn)
+        serializer = self.get_serializer(instance=txn, data=data, partial=True)
+        if not serializer.is_valid():
+            slack_logger.error(serializer.errors)
+            return Response(data={"error": "Error during Transaction update"}, status=HTTP_400_BAD_REQUEST)
+
+        try:
+            update_transaction(transaction=serializer.save())
+        except SorobanException:
+            return Response(data={"error": "Error during Transaction update"}, status=HTTP_400_BAD_REQUEST)
+
+        res_data = self.get_serializer(instance=self.get_object()).data
+        return Response(data=res_data, status=HTTP_200_OK, headers=self.get_success_headers(data=res_data))

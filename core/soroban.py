@@ -1,12 +1,13 @@
 import base64
 import binascii
+import json
+import os
 import time
 from collections import defaultdict
-from copy import deepcopy
 from functools import wraps
 from json import JSONDecodeError
 from logging import getLogger
-from typing import Callable, Collection, DefaultDict, List, Optional, Type, Union
+from typing import DefaultDict, Optional, Type
 
 from django.conf import settings
 from django.core.cache import cache
@@ -19,28 +20,32 @@ from stellar_sdk import (
     SorobanServer,
     StrKey,
     TransactionBuilder,
+    TransactionEnvelope,
     scval,
 )
 from stellar_sdk import xdr as stellar_xdr
-from stellar_sdk.exceptions import SorobanRpcErrorResponse
+from stellar_sdk.exceptions import PrepareTransactionException, SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import (
     EventFilter,
     GetTransactionStatus,
     Request,
     Response,
     SendTransactionStatus,
+    SimulateTransactionResponse,
 )
 from stellar_sdk.soroban_server import V
 from stellar_sdk.utils import sha256
 from stellar_sdk.xdr import (
+    Hash,
     HostFunction,
     HostFunctionType,
-    InvokeHostFunctionOp,
+    Operation,
     OperationBody,
     OperationResultTr,
     OperationType,
     SCAddress,
     SCAddressType,
+    SCErrorType,
     SCSymbol,
     SCVal,
     SCValType,
@@ -50,12 +55,13 @@ from stellar_sdk.xdr import (
 
 from core import models as core_models
 from core.event_handler import soroban_event_handler
+from multiclique import models as multiclique_models
 
 logger = getLogger("alerts")
 slack_logger = getLogger("alerts.slack")
 
 
-def unpack_sc(val):
+def unpack_sc(val: SCVal | SCVec | SCAddress | SCSymbol | Hash):
     if isinstance(val, SCVec):
         return [unpack_sc(_val) for _val in val.sc_vec]
     elif isinstance(val, SCAddress):
@@ -65,6 +71,8 @@ def unpack_sc(val):
             return StrKey.encode_contract(val.contract_id.hash)
     elif isinstance(val, SCSymbol):
         return val.sc_symbol.decode().strip()
+    elif isinstance(val, Hash):
+        return base64.b64encode(val.hash).decode()
 
     match val.type:
         case SCValType.SCV_MAP:
@@ -101,12 +109,17 @@ def unpack_sc(val):
             return val.i128.hi.int64 << 64 | val.i128.lo.uint64
         case SCValType.SCV_ERROR:
             err = val.error
-            return f"type: {err.type.name}: {err.type.value} | code: {err.code.name}: {err.code.value}"
+            match err.type:
+                case SCErrorType.SCE_CONTRACT:
+                    return f"contract_code: {err.contract_code.uint32}"
+            try:
+                return f"type: {err.type.name}: {err.type.value} | code: {err.code.name}: {err.code.value}"
+            except Exception:  # noqa
+                pass
         case SCValType.SCV_STRING:
             return val.str.sc_string.decode()
 
-    slack_logger.error(f"Unhandled SC(Val)Type: {str(val)}")
-    return str(val)
+    raise NotImplementedException(f"Unhandled SC(Val)Type: {str(val)}")
 
 
 def unpack_operation_body(body: OperationBody):
@@ -114,8 +127,7 @@ def unpack_operation_body(body: OperationBody):
         case OperationType.INVOKE_HOST_FUNCTION:
             return body.invoke_host_function_op
         case _:
-            slack_logger.error(f"Unhandled OperationBody: {str(body)}")
-            return str(body)
+            raise NotImplementedException(f"Unhandled OperationBody: {str(body)}")
 
 
 def unpack_host_function(func: HostFunction):
@@ -126,15 +138,27 @@ def unpack_host_function(func: HostFunction):
                 "func_name": unpack_sc(func.invoke_contract.function_name),
                 "func_args": [unpack_sc(arg) for arg in func.invoke_contract.args],
             }
+        case HostFunctionType.HOST_FUNCTION_TYPE_CREATE_CONTRACT:
+            return {
+                "func_name": "create_contract",
+                "contract_id_preimage": {
+                    "address": unpack_sc(func.create_contract.contract_id_preimage.from_address.address),
+                    "salt": base64.b64encode(
+                        func.create_contract.contract_id_preimage.from_address.salt.uint256
+                    ).decode(),
+                },
+                "executable": {"wasm_hash": unpack_sc(func.create_contract.executable.wasm_hash)},
+            }
         case _:
-            slack_logger.error(f"Unhandled HostFunction: {str(func)}")
-            return str(func)
+            raise NotImplementedException(f"Unhandled HostFunction: {str(func)}")
 
 
 def unpack_operation_result_tr(val: OperationResultTr):
     match val.type:
         case OperationType.INVOKE_HOST_FUNCTION:
             return val.invoke_host_function_result.code
+        case _:
+            raise NotImplementedException(f"Unhandled OperationType: {str(val)}")
 
 
 def retry(description: str):
@@ -212,6 +236,46 @@ def retry(description: str):
     return wrap
 
 
+def update_transaction(
+    transaction: multiclique_models.MultiCliqueTransaction,
+):
+    """
+    Args:
+        transaction: MultiCliqueTransaction to update
+
+    Returns:
+        updated MultiCliqueTransaction
+
+    if the transaction's approval count fulfills its threshold:
+        a new, authorized, executable transaction xdr is created
+        status is updated to TransactionStatus.EXECUTABLE
+    if the transaction's rejection count prevents reaching the threshold:
+        status is updated to TransactionStatus.REJECTED
+    """
+    update_fields = []
+    if transaction.approvals.count() >= transaction.multiclique_account.default_threshold:
+        envelope = soroban_service.prepare_transaction(
+            envelope=soroban_service.authorize_transaction(
+                obj=transaction.xdr,
+                signature_data=soroban_service.create_signature_data(signatures=transaction.approvals.all()),
+                nonce=transaction.nonce,
+                ledger=transaction.ledger,
+            )
+        )
+        transaction.xdr = envelope.to_xdr()
+        transaction.status = multiclique_models.TransactionStatus.EXECUTABLE
+        update_fields = ["xdr", "status"]
+    elif (
+        transaction.multiclique_account.signatories.count() - transaction.rejections.count()
+        < transaction.multiclique_account.default_threshold
+    ):
+        transaction.status = multiclique_models.TransactionStatus.REJECTED
+        update_fields = ["status"]
+
+    if update_fields:
+        transaction.save(update_fields=update_fields)
+
+
 class RestartListenerException(Exception):
     pass
 
@@ -220,9 +284,21 @@ class SorobanException(Exception):
     msg = None
     ctx = None
 
-    def __init__(self, *_, ctx=None):
-        self.ctx = ctx
-        super().__init__(self.msg)
+    def __init__(self, msg=None, ctx=None):
+        self.ctx = ctx or {}
+        super().__init__((self.msg,) if not msg else msg)
+
+
+class LoggedException(SorobanException):
+    def __init__(self, msg=None, ctx=None):
+        super().__init__(msg, ctx)
+        slack_logger.error(
+            f"{self.msg + ': ' if self.msg else ''}{str(msg) if msg else ''} ctx: {json.dumps(self.ctx)}"
+        )
+
+
+class NotImplementedException(LoggedException):
+    msg = "NotImplementedException"
 
 
 class OutOfSyncException(SorobanException):
@@ -261,6 +337,7 @@ class SorobanService(object):
     soroban: RobustSorobanServer = None
     network_passphrase: str = None
     wait_for_txn_interval: int = 1  # seconds
+    signature_validity_period: int = None  # ledgers
 
     @retry("initializing blockchain connection")
     def __init__(self):
@@ -268,193 +345,125 @@ class SorobanService(object):
         self.soroban = RobustSorobanServer(server_url=config["blockchain_url"])
         self.network_passphrase = config["network_passphrase"]
         self.multiclique_addr = config["multiclique_contract_address"]
+        self.signature_validity_period = round(settings.SIGNATURE_VALIDITY_PERIOD / settings.BLOCK_CREATION_INTERVAL)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.soroban.close()
 
-    # todo replace w/ sdk version, once fixed
-    @staticmethod
-    def authorize_entry(
-        entry: Union[stellar_xdr.SorobanAuthorizationEntry, str],
-        signers: List[(Union[Keypair, Callable[[stellar_xdr.HashIDPreimage], bytes]])],
-        valid_until_ledger_sequence: int,
-        network_passphrase: str,
-    ) -> stellar_xdr.SorobanAuthorizationEntry:
-        """Actually authorizes an existing authorization entry using the given the
-        credentials and expiration details, returning a signed copy.
-
-        This "fills out" the authorization entry with a signature, indicating to the
-        :class:`stellar_sdk.InvokeHostFunction` it's attached to that:
-
-        * a particular identity (i.e. signing :class:`stellar_sdk.Keypair` or other signer)
-        * approving the execution of an invocation tree (i.e. a
-            simulation-acquired :class:`stellar_xdr.SorobanAuthorizedInvocation` or otherwise built)
-        * on a particular network (uniquely identified by its passphrase, see :class:`stellar_sdk.Network`)
-        * until a particular ledger sequence is reached.
-
-        :param entry: an unsigned Soroban authorization entry.
-        :param signers: list of either a :class:`Keypair` or a function which takes a payload
-            (a :class:`stellar_xdr.HashIDPreimage` instance) input and returns a bytes signature,
-            the signing key should correspond to the address in the `entry`.
-        :param valid_until_ledger_sequence: the (exclusive) future ledger sequence number until which
-            this authorization entry should be valid (if `currentLedgerSeq==validUntil`, this is expired)
-        :param network_passphrase: the network passphrase is incorporated into the signature
-            (see :class:`stellar_sdk.Network` for options)
-        :return: a signed Soroban authorization entry.
-        """
-
-        if isinstance(entry, str):
-            entry = stellar_xdr.SorobanAuthorizationEntry.from_xdr(entry)
-        else:
-            entry = deepcopy(entry)
-
-        if entry.credentials.type != stellar_xdr.SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS:
-            return entry
-
-        assert entry.credentials.address is not None
-        addr_auth = entry.credentials.address
-        addr_auth.signature_expiration_ledger = stellar_xdr.Uint32(valid_until_ledger_sequence)
-
-        network_id = Network(network_passphrase).network_id()
-        preimage = stellar_xdr.HashIDPreimage(
-            type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
-            soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
-                network_id=stellar_xdr.Hash(network_id),
-                nonce=addr_auth.nonce,
-                signature_expiration_ledger=addr_auth.signature_expiration_ledger,
-                invocation=entry.root_invocation,
-            ),
-        )
-        payload = sha256(preimage.to_xdr_bytes())
-        signatures = []
-
-        for signer in signers:
-            if isinstance(signer, Keypair):
-                signature = signer.sign(payload)
-            else:
-                signature = signer(preimage)
-            public_key = Address.from_raw_account(signer.raw_public_key()).key
-            signatures.append(
-                scval.to_map(
-                    {
-                        scval.to_symbol("public_key"): scval.to_bytes(public_key),
-                        scval.to_symbol("signature"): scval.to_bytes(signature),
-                    }
-                )
+    def create_preimage_hash(
+        self,
+        entry: SorobanAuthorizationEntry,
+        latest_ledger: int,
+    ) -> str:
+        auth_addr = entry.credentials.address
+        auth_addr.signature_expiration_ledger = stellar_xdr.Uint32(latest_ledger + self.signature_validity_period)
+        if auth_addr:
+            preimage = stellar_xdr.HashIDPreimage(
+                type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
+                soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
+                    network_id=stellar_xdr.Hash(Network(self.network_passphrase).network_id()),
+                    nonce=auth_addr.nonce,
+                    signature_expiration_ledger=auth_addr.signature_expiration_ledger,
+                    invocation=entry.root_invocation,
+                ),
             )
+            return base64.b64encode(sha256(preimage.to_xdr_bytes())).decode()
 
-        addr_auth.signature = scval.to_vec(signatures)
-        return entry
-
-    def create_preimage_hash(self, entry: SorobanAuthorizationEntry) -> str:
+    def _parse_envelope(self, obj: str | TransactionEnvelope) -> (TransactionEnvelope, Operation, str):
         """
         Args:
-            entry: auth entry to generate preimage hash from
+            obj: XDR str or TransactionEnvelope to parse
 
         Returns:
-            preimage hash as b64 encoded str
+            (TransactionEnvelope, Operation, source account id)
+
+        helper function to extract the Operation and source account id from the given TransactionEnvelope or the
+        corresponding XDR str
         """
-        addr_auth = entry.credentials.address
-        # todo not sure if we need a different expiration ledger
-        # addr_auth.signature_expiration_ledger = stellar_xdr.Uint32(?)
+        if isinstance(obj, str):
+            try:
+                envelope = TransactionEnvelope.from_xdr(xdr=obj, network_passphrase=self.network_passphrase)
+            except binascii.Error as err:
+                raise InvalidXDRException(ctx={"xdr": obj, "error": str(err)})
+        elif isinstance(obj, stellar_xdr.TransactionEnvelope):
+            envelope = TransactionEnvelope.from_xdr_object(xdr_object=obj, network_passphrase=self.network_passphrase)
+        elif isinstance(obj, TransactionEnvelope):
+            envelope = obj
+        else:
+            raise NotImplementedException(f"_parse_envelope failed, invalid object type: {type(obj)}")
 
-        network_id = Network(self.network_passphrase).network_id()
-        preimage = stellar_xdr.HashIDPreimage(
-            type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
-            soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
-                network_id=stellar_xdr.Hash(network_id),
-                nonce=addr_auth.nonce,
-                signature_expiration_ledger=addr_auth.signature_expiration_ledger,
-                invocation=entry.root_invocation,
-            ),
-        )
-        return base64.b64encode(sha256(preimage.to_xdr_bytes())).decode()
+        if len(operations := envelope.transaction.operations) > 1:
+            raise NotImplementedException("_parse_envelope failed, multiple txn operations")
 
-    def analyze_xdr(self, xdr: str):
-        # todo improve: signatures? handle exceptions. move to unpack_operation_body?
-        try:
-            envelope = stellar_xdr.TransactionEnvelope.from_xdr(xdr=xdr)
-        except binascii.Error as err:
-            raise InvalidXDRException(ctx={"xdr": xdr, "error": str(err)})
+        operation = operations[0]
+        source_acc = envelope.transaction.source.account_id
 
-        source_acc = StrKey.encode_ed25519_public_key(envelope.v1.tx.source_account.ed25519.uint256)
-        if isinstance(op := unpack_operation_body(envelope.v1.tx.operations[0].body), InvokeHostFunctionOp):
-            signers = []
-            for entry in op.auth:
-                sigs: dict | list[dict] = unpack_sc(entry.credentials.address.signature)
-                if isinstance(sigs, Collection):
-                    signers.extend([sig["public_key"] for sig in sigs])
-                # todo check if that can happen
-                else:
-                    signers.append(sigs["public_key"])
-            func_call = unpack_host_function(op.host_function)
-            return {
-                "source_acc": source_acc,
-                "contract_address": func_call["contract_address"],
-                "func_name": func_call["func_name"],
-                "func_args": func_call["func_args"],
-                "signers": signers,
-                "preimage_hash": self.create_preimage_hash(entry=op.auth[0]),
-            }
+        return envelope, operation, source_acc
 
-    def invoke_contract_func(
-        self,
-        func_name: str,
-        func_args: list,
-        signers: [Keypair],
-        contract_addr: str = None,
-        base_fee=100,
-        timeout=300,
-    ):
-        if contract_addr is None:
-            contract_addr = self.multiclique_addr
+    def _simulate_transaction(
+        self, envelope: TransactionEnvelope, metadata: dict = None
+    ) -> SimulateTransactionResponse:
+        """
+        Args:
+            envelope: TransactionEnvelope to simulate
+            metadata: metadata used for error logging
 
-        metadata = {
-            "contract_addr": contract_addr,
-            "func_name": func_name,
-            "func_args": [unpack_sc(arg) for arg in func_args],
+        Returns:
+            SimulateTransactionResponse
+
+        validation and error handling wrapper around soroban.simulate_transaction
+        """
+        if metadata is None:
+            metadata = {}
+        sim_txn = self.soroban.simulate_transaction(transaction_envelope=envelope)
+        if sim_txn.error:
+            raise LoggedException(f"soroban.simulate_transaction failed: {sim_txn.error}", ctx=metadata)
+        if sim_txn.results is None:
+            raise LoggedException("soroban.simulate_transaction yielded no results", ctx=metadata)
+        if len(sim_txn.results[0].auth) > 1:
+            raise NotImplementedException(
+                "_simulate_transaction failed, multiple SorobanAuthorizationEntries", ctx=metadata
+            )
+        return sim_txn
+
+    def analyze_transaction(self, obj: str | TransactionEnvelope) -> dict:
+        """
+        Args:
+            obj: XDR str or TransactionEnvelope
+
+        Returns:
+            dictionary containing function data
+        """
+        envelope, operation, source_acc = self._parse_envelope(obj)
+        sim_txn = self._simulate_transaction(envelope=envelope)
+        nonce = None
+        preimage_hash = None
+        if sim_txn.results and (auth := sim_txn.results[0].auth):
+            auth_entry = SorobanAuthorizationEntry.from_xdr(auth[0])
+            preimage_hash = self.create_preimage_hash(
+                entry=auth_entry,
+                latest_ledger=sim_txn.latest_ledger,
+            )
+            nonce = auth_entry.credentials.address.nonce.int64
+
+        return {
+            **unpack_host_function(operation.host_function),
+            "source_acc": source_acc,
+            "preimage_hash": preimage_hash,
+            "nonce": nonce,
+            "ledger": sim_txn.latest_ledger,
         }
-        envelope = (
-            TransactionBuilder(
-                source_account=self.soroban.load_account(signers[0].public_key),
-                network_passphrase=self.network_passphrase,
-                base_fee=base_fee,
-            )
-            .set_timeout(timeout)
-            .append_invoke_contract_function_op(
-                contract_id=contract_addr,
-                function_name=func_name,
-                parameters=func_args,
-            )
-            .build()
-        )
-        sim_txn = self.soroban.simulate_transaction(envelope)
-        # todo fix this
-        assert isinstance(envelope.transaction.operations[0], InvokeHostFunction)
-        assert sim_txn.results is not None
 
-        if _auth := sim_txn.results[0].auth:
-            envelope.transaction.operations[0].auth = [
-                self.authorize_entry(
-                    entry=_auth[0],
-                    signers=signers,
-                    valid_until_ledger_sequence=sim_txn.latest_ledger + 20,
-                    network_passphrase=self.network_passphrase,
-                )
-            ]
-        envelope = self.soroban.prepare_transaction(
-            transaction_envelope=envelope, simulate_transaction_response=sim_txn
-        )
-        envelope.transaction.fee *= 2
-        envelope.transaction.soroban_data.resources.instructions.uint32 *= 2
-        envelope.sign(signers[0])
+    def get_transaction(self, txn_hash, metadata: dict = None):
+        """
+        Args:
+            txn_hash: transaction hash to fetch the transaction for
+            metadata: metadata used for error logging
 
-        send_txn_res = self.soroban.send_transaction(envelope)
-        if send_txn_res.status != SendTransactionStatus.PENDING:
-            err = stellar_xdr.TransactionResult.from_xdr(send_txn_res.error_result_xdr).result.code.name
-            raise SorobanException(f"send_transaction failed: {err}", ctx=metadata)
-
-        while (get_txn_res := self.soroban.get_transaction(send_txn_res.hash)).status == GetTransactionStatus.NOT_FOUND:
+        Returns:
+            transaction result
+        """
+        while (get_txn_res := self.soroban.get_transaction(txn_hash)).status == GetTransactionStatus.NOT_FOUND:
             time.sleep(self.wait_for_txn_interval)
 
         if get_txn_res.status == GetTransactionStatus.FAILED:
@@ -470,15 +479,214 @@ class SorobanService(object):
                         "contract_id": _event.contract_id and StrKey.encode_contract(_event.contract_id.hash),
                         "type": _event.type.name,
                         "in_successful_contract_call": event.in_successful_contract_call,
-                        "topics": unpack_sc(body.topics),
+                        "topics": [unpack_sc(topic) for topic in body.topics],
                         "data": unpack_sc(body.data),
                     }
                 )
-            raise SorobanException(
-                f"transaction failed: {errs}", ctx={"diagnostic_events": diagnostic_events, **metadata}
+            raise LoggedException(
+                f"transaction failed: {errs}", ctx={"diagnostic_events": diagnostic_events, **(metadata or {})}
             )
 
         return unpack_sc(stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value)
+
+    def prepare_transaction(self, envelope: TransactionEnvelope, keypair: Keypair = None, sim_txn=None):
+        try:
+            envelope = self.soroban.prepare_transaction(
+                transaction_envelope=envelope, simulate_transaction_response=sim_txn
+            )
+        except PrepareTransactionException as exc:
+            raise LoggedException(f"prepare_transaction failed: {exc.simulate_transaction_response.error}")
+
+        envelope.transaction.fee *= 2
+        envelope.transaction.soroban_data.resources.instructions.uint32 *= 2
+        if keypair:
+            envelope.sign(keypair)
+        return envelope
+
+    def send_transaction(self, envelope: TransactionEnvelope, metadata: dict = None):
+        """
+        Args:
+            envelope: TransactionEnvelope to send
+            metadata: metadata used for error logging
+
+        Returns:
+            transaction result
+        """
+        send_txn_res = self.soroban.send_transaction(envelope)
+        if send_txn_res.status != SendTransactionStatus.PENDING:
+            err = stellar_xdr.TransactionResult.from_xdr(send_txn_res.error_result_xdr).result.code.name
+            raise LoggedException(f"send_transaction failed: {err}", ctx=metadata or {})
+
+        return self.get_transaction(send_txn_res.hash, metadata=metadata)
+
+    def create_install_contract_transaction(self, source_account_address: str, wasm_id: str) -> TransactionEnvelope:
+        """
+        Args:
+            source_account_address: source account address to create the transaction for
+            wasm_id: wasm id to create the transaction for
+
+        Returns:
+            an install contract TransactionEnvelope
+        """
+        try:
+            return self.soroban.prepare_transaction(
+                (
+                    TransactionBuilder(
+                        source_account=soroban_service.soroban.load_account(source_account_address),
+                        network_passphrase=self.network_passphrase,
+                    )
+                    .set_timeout(300)
+                    .append_create_contract_op(wasm_id=wasm_id, address=source_account_address, salt=os.urandom(32))
+                ).build()
+            )
+        except PrepareTransactionException as exc:
+            raise LoggedException(
+                f"create_install_contract_txn failed: {exc.message}",
+                ctx={"source_account_address": source_account_address, "wasm_id": wasm_id},
+            )
+
+    @staticmethod
+    def create_signature_data(
+        preimage_hash: str = None,
+        signers: [Keypair] = None,
+        signatures: [multiclique_models.MultiCliqueSignature] = None,
+    ) -> SCVal:
+        if signatures is None:
+            signatures = []
+        if preimage_hash and signers:
+            for signer in signers:
+                signature = signer.sign(base64.b64decode(preimage_hash.encode()))
+                public_key = Address(signer.public_key).key
+                signatures.append(
+                    scval.to_map(
+                        {
+                            scval.to_symbol("public_key"): scval.to_bytes(public_key),
+                            scval.to_symbol("signature"): scval.to_bytes(signature),
+                        }
+                    )
+                )
+        else:
+            signatures = [
+                scval.to_map(
+                    {
+                        scval.to_symbol("public_key"): scval.to_bytes(Address(sig.signatory_id).key),
+                        scval.to_symbol("signature"): scval.to_bytes(base64.b64decode(sig.signature.encode())),
+                    }
+                )
+                for sig in signatures
+            ]
+
+        return scval.to_vec(signatures)
+
+    def authorize_transaction(
+        self,
+        obj: str | TransactionEnvelope,
+        signature_data: SCVal,
+        sim_txn: SimulateTransactionResponse = None,
+        nonce: int = None,
+        ledger: int = None,
+    ) -> TransactionEnvelope:
+        """
+        Args:
+            obj: XDR str or TransactionEnvelope to add signers for
+            signature_data: SCV_VEC[SCV_MAP] containing public keys and signatures
+            sim_txn: optional SimulateTransactionResponse to avoid unnecessary simulations
+            nonce: nonce used to create the corresponding Preimage
+            ledger: ledger used to create the corresponding Preimage
+
+        adds a SorobanAuthorizationEntry to the given TransactionEnvelope
+        if a TransactionEnvelope XDR str is given the updated TransactionEnvelope is returned
+        """
+        envelope, operation, _ = self._parse_envelope(obj)
+        if not isinstance(operation, InvokeHostFunction):
+            raise NotImplementedException(f"authorize_transaction failed, invalid operation: {type(operation)}")
+
+        if sim_txn is None:
+            sim_txn = self._simulate_transaction(envelope=envelope)
+            ledger = sim_txn.latest_ledger
+
+        auth_entry = stellar_xdr.SorobanAuthorizationEntry.from_xdr(sim_txn.results[0].auth[0])
+        if auth_entry.credentials.type != stellar_xdr.SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS:
+            raise NotImplementedException(
+                f"authorize_transaction failed, invalid credentials type: {auth_entry.credentials.type}"
+            )
+
+        auth_addr = auth_entry.credentials.address
+        auth_addr.nonce = stellar_xdr.Int64(nonce)
+        auth_addr.signature_expiration_ledger = stellar_xdr.Uint32(ledger + self.signature_validity_period)
+        auth_addr.signature = signature_data
+        operation.auth = [auth_entry]
+        return envelope
+
+    def install_contract(self, source_account_address: str, wasm_id: str, keypair: Keypair):
+        txn = self.create_install_contract_transaction(source_account_address=source_account_address, wasm_id=wasm_id)
+        txn.sign(keypair)
+        return self.send_transaction(txn)
+
+    def create_invoke_contract_func_transaction(
+        self,
+        func_name: str,
+        func_args: list,
+        source_account: str,
+        contract_addr: str = None,
+        base_fee=100,
+        timeout=300,
+    ):
+        if contract_addr is None:
+            contract_addr = self.multiclique_addr
+
+        return (
+            TransactionBuilder(
+                source_account=self.soroban.load_account(source_account),
+                network_passphrase=self.network_passphrase,
+                base_fee=base_fee,
+            )
+            .set_timeout(timeout)
+            .append_invoke_contract_function_op(
+                contract_id=contract_addr,
+                function_name=func_name,
+                parameters=func_args,
+            )
+            .build()
+        )
+
+    def invoke_contract_func(
+        self,
+        func_name: str,
+        func_args: list,
+        signers: [Keypair],
+        contract_addr: str = None,
+        base_fee=100,
+        timeout=300,
+    ):
+        metadata = {
+            "contract_addr": contract_addr,
+            "func_name": func_name,
+            "func_args": [unpack_sc(arg) for arg in func_args],
+        }
+        envelope = self.create_invoke_contract_func_transaction(
+            func_name=func_name,
+            func_args=func_args,
+            source_account=signers[0].public_key,
+            contract_addr=contract_addr,
+            base_fee=base_fee,
+            timeout=timeout,
+        )
+        sim_txn = self._simulate_transaction(envelope=envelope)
+        if auth := sim_txn.results[0].auth:
+            preimage_hash = self.create_preimage_hash(
+                entry=stellar_xdr.SorobanAuthorizationEntry.from_xdr(auth[0]),
+                latest_ledger=sim_txn.latest_ledger,
+            )
+            self.authorize_transaction(
+                obj=envelope,
+                signature_data=self.create_signature_data(preimage_hash=preimage_hash, signers=signers),
+                sim_txn=sim_txn,
+            )
+        return self.send_transaction(
+            envelope=self.prepare_transaction(envelope=envelope, keypair=signers[0], sim_txn=sim_txn),
+            metadata=metadata,
+        )
 
     @staticmethod
     def verify(address: str, challenge_address: str, signature: str) -> bool:

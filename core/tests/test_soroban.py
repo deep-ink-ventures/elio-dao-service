@@ -37,6 +37,7 @@ from stellar_sdk.xdr import (
 from core import models
 from core.soroban import (
     NoLongerAvailableException,
+    NotImplementedException,
     OutOfSyncException,
     RestartListenerException,
     RobustSorobanServer,
@@ -130,22 +131,22 @@ class SorobanTest(IntegrationTestCase):
             ),
             ["a", "b", True],
         ),
-        # not implemented example
-        (
-            SCVal(
-                SCValType.SCV_LEDGER_KEY_NONCE,
-                nonce_key=SCNonceKey(nonce=Int64(int64=123)),
-            ),
-            "<SCVal [type=21, nonce_key=<SCNonceKey [nonce=<Int64 [int64=123]>]>]>",
-        ),
     )
-    @patch("core.soroban.slack_logger")
-    def test_unpack_sc(self, case, slack_logger):
+    def test_unpack_sc(self, case):
         input_value, expected = case
 
         self.assertEqual(unpack_sc(input_value), expected, input_value)
-        if isinstance(expected, str) and "SCVal" in expected:
-            slack_logger.error.assert_called_once_with(f"Unhandled SC(Val)Type: {expected}")
+
+    @patch("core.soroban.slack_logger")
+    def test_unpack_sc_not_implemented(self, slack_logger):
+        expected_err_msg = (
+            "Unhandled SC(Val)Type: <SCVal [type=21, nonce_key=<SCNonceKey [nonce=<Int64 [int64=123]>]>]>"
+        )
+        with self.assertRaisesMessage(NotImplementedException, expected_err_msg):
+            self.assertIsNone(
+                unpack_sc(SCVal(SCValType.SCV_LEDGER_KEY_NONCE, nonce_key=SCNonceKey(nonce=Int64(int64=123))))
+            )
+        slack_logger.error.assert_called_once_with(f"NotImplementedException: {expected_err_msg} ctx: {'{}'}")
 
     @patch("core.soroban.slack_logger")
     @patch("core.soroban.logger")

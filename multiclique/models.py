@@ -1,4 +1,3 @@
-from django.contrib.postgres.fields import ArrayField
 from django.db import models
 
 from core.models import TimestampableMixin
@@ -23,6 +22,16 @@ class MultiCliqueSignatory(TimestampableMixin):
         db_table = "multiclique_signatory"
         verbose_name = "MultiClique Signatory"
         verbose_name_plural = "MultiClique Signatories"
+
+
+class MultiCliqueSignature(TimestampableMixin):
+    signatory = models.ForeignKey(MultiCliqueSignatory, on_delete=models.DO_NOTHING)
+    signature = models.CharField(max_length=256, primary_key=True)
+
+    class Meta:
+        db_table = "multiclique_signature"
+        verbose_name = "MultiClique Signature"
+        verbose_name_plural = "MultiClique Signatures"
 
 
 class MultiCliqueAccount(TimestampableMixin):
@@ -50,15 +59,16 @@ class TransactionStatus(ChoiceEnum):
 
 class MultiCliqueTransaction(TimestampableMixin):
     xdr = models.CharField(max_length=4096)
+    nonce = models.BigIntegerField()
+    ledger = models.BigIntegerField()
     preimage_hash = models.CharField(max_length=1024)
     call_func = models.CharField(max_length=256, null=True)
     call_args = models.JSONField(null=True)
     multiclique_account = models.ForeignKey(MultiCliqueAccount, related_name="transactions", on_delete=models.CASCADE)
-    approvers = ArrayField(models.CharField(max_length=256), default=list)
-    rejecters = ArrayField(models.CharField(max_length=256), default=list)
+    approvals = models.ManyToManyField(MultiCliqueSignature, related_name="transaction_approvals")
+    rejections = models.ManyToManyField(MultiCliqueSignature, related_name="transaction_rejections")
     status = models.CharField(max_length=16, choices=TransactionStatus.as_choices(), default=TransactionStatus.PENDING)
     executed_at = models.DateTimeField(null=True, blank=True)
-
     # todo find unique id
 
     class Meta:
