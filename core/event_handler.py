@@ -24,6 +24,8 @@ class SorobanEventHandler:
     topics_to_action = None
 
     def __init__(self):
+        from multiclique.event_handler import multiclique_event_handler
+
         self.topics_to_action = {
             ("DAO", "created"): self._create_daos,
             ("DAO", "destroyed"): self._delete_daos,
@@ -38,6 +40,7 @@ class SorobanEventHandler:
             ("PROPOSAL", "vote_cast"): self._register_votes,
             ("PROPOSAL", "state_upd"): self._update_proposal_status,
             ("PROPOSAL", "faulted"): self._fault_proposals,
+            **multiclique_event_handler.topics_to_action,
         }
 
     @staticmethod

@@ -26,6 +26,7 @@ from multiclique import models
 class MultiCliqueViewSetTest(IntegrationTestCase):
     def setUp(self):
         super().setUp()
+        cache.clear()
         self.signer1 = models.MultiCliqueSignatory.objects.create(address="pk1", name="signer1")
         self.signer2 = models.MultiCliqueSignatory.objects.create(address="pk2", name="signer2")
         self.signer3 = models.MultiCliqueSignatory.objects.create(address="pk3", name="signer3")
@@ -34,8 +35,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.sig2 = models.MultiCliqueSignature.objects.create(signatory=self.signer2, signature="sig2")
         self.sig3 = models.MultiCliqueSignature.objects.create(signatory=self.signer3, signature="sig3")
         self.sig4 = models.MultiCliqueSignature.objects.create(signatory=self.signer4, signature="sig4")
-        self.pol1 = models.MultiCliquePolicy.objects.create(name="POL1", active=True)
-        self.pol2 = models.MultiCliquePolicy.objects.create(name="POL2", active=False)
+        self.pol1 = models.MultiCliquePolicy.objects.create(address="POL1", name="ELIO_DAO", active=True)
+        self.pol2 = models.MultiCliquePolicy.objects.create(address="POL2", name="ELIO_DAO", active=False)
         self.mc1 = models.MultiCliqueAccount(address="addr1", name="acc1", policy=self.pol1, default_threshold=2)
         self.mc1.signatories.set([self.signer1, self.signer2, self.signer3, self.signer4])
         self.mc1.save()
@@ -174,7 +175,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr1",
             "name": "acc1",
-            "policy": "POL1",
+            "policy": {"active": True, "address": "POL1", "name": "ELIO_DAO"},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -196,7 +197,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 {
                     "address": "addr1",
                     "name": "acc1",
-                    "policy": "POL1",
+                    "policy": {"active": True, "address": "POL1", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -208,7 +209,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 {
                     "address": "addr2",
                     "name": "acc2",
-                    "policy": "POL2",
+                    "policy": {"active": False, "address": "POL2", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk2", "name": "signer2"},
                         {"address": "pk3", "name": "signer3"},
@@ -250,7 +251,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
-            "policy": "POL_3",
+            "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -266,7 +267,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 data={
                     "address": "addr3",
                     "name": "acc1",
-                    "policy": "pOl_ 3",
+                    "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2"},
@@ -278,7 +279,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 content_type="application/json",
             )
 
-        self.assertEqual(res.status_code, HTTP_201_CREATED, res.json())
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
         mc3 = models.MultiCliqueAccount.objects.get(address="addr3")
         self.assertModelEqual(
@@ -287,7 +288,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 **{
                     "address": "addr3",
                     "name": "acc1",
-                    "policy": models.MultiCliquePolicy.objects.get(name="POL_3"),
+                    "policy": models.MultiCliquePolicy.objects.get(address="POL3"),
                     "default_threshold": 3,
                 }
             ),
@@ -320,7 +321,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
-            "policy": "POL_3",
+            "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -346,7 +347,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 data={
                     "address": "addr3",
                     "name": "acc1",
-                    "policy": "pOl_ 3",
+                    "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -367,7 +368,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 **{
                     "address": "addr3",
                     "name": "acc1",
-                    "policy": models.MultiCliquePolicy.objects.get(name="POL_3"),
+                    "policy": models.MultiCliquePolicy.objects.get(address="POL3"),
                     "default_threshold": 3,
                 }
             ),
@@ -380,7 +381,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr2",
             "name": "acc1",
-            "policy": "POL2",
+            "policy": {"address": "POL2", "name": "ELIO_DAO", "active": True},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -390,13 +391,13 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "default_threshold": 3,
         }
 
-        with self.assertNumQueries(12):
+        with self.assertNumQueries(13):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr2",
                     "name": "acc1",
-                    "policy": "POL2",
+                    "policy": {"address": "POL2", "name": "ELIO_DAO", "active": True},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -412,16 +413,14 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.json(), expected_res)
 
     def test_multiclique_account_create_invalid(self):
-        expected_res = {
-            "name": ["This field is required."],
-        }
+        expected_res = {"name": ["This field is required."], "policy": {"name": ["This field is required."]}}
 
         with self.assertNumQueries(0):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr2",
-                    "policy": "POL2",
+                    "policy": {"address": "POL3", "active": True},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -447,7 +446,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.json(), expected_res)
         self.assertEqual(cache.get(self.mc1.address), res.json()["challenge"])
 
-    def test_multiclique_account_create_jwt_token(self):
+    def test_multiclique_account_create_jwt_token_acc(self):
         challenge = "hard_challenge"
         keypair = Keypair.random()
         cache.set(key=keypair.public_key, value=challenge, timeout=5)
@@ -456,7 +455,28 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             address=keypair.public_key, name="acc3", policy=self.pol1, default_threshold=2
         )
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
+            res = self.client.post(
+                reverse("multiclique-accounts-create-jwt-token", kwargs={"address": acc.address}),
+                data={"signature": sig},
+                content_type="application/json",
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), {"access": ANY, "refresh": ANY})
+
+    def test_multiclique_account_create_jwt_token_signatory(self):
+        acc = models.MultiCliqueAccount.objects.create(
+            address="addr3", name="acc3", policy=self.pol1, default_threshold=2
+        )
+        challenge = "hard_challenge"
+        keypair = Keypair.random()
+        cache.set(key=acc.address, value=challenge, timeout=5)
+        sig = base64.b64encode(keypair.sign(data=challenge.encode())).decode()
+        acc.signatories.add(models.MultiCliqueSignatory.objects.create(address=keypair.public_key, name="som"))
+        acc.save()
+
+        with self.assertNumQueries(2):
             res = self.client.post(
                 reverse("multiclique-accounts-create-jwt-token", kwargs={"address": acc.address}),
                 data={"signature": sig},
@@ -474,7 +494,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             address=keypair.public_key, name="acc3", policy=self.pol1, default_threshold=2
         )
 
-        with self.assertNumQueries(1):
+        with self.assertNumQueries(2):
             res = self.client.post(
                 reverse("multiclique-accounts-create-jwt-token", kwargs={"address": acc.address}),
                 data={"signature": "wrong"},
@@ -795,7 +815,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             ],
         }
 
-        with self.assertNumQueries(21):
+        with self.assertNumQueries(23):
             res = self.client.patch(
                 reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
                 data={
@@ -877,7 +897,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             ],
         }
 
-        with self.assertNumQueries(24):
+        with self.assertNumQueries(27):
             res = self.client.patch(
                 reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
                 data={

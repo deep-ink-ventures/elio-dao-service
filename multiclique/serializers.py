@@ -30,7 +30,18 @@ class MultiCliqueContractXDRSerializer(serializers.Serializer):
 class MultiCliquePolicySerializer(ModelSerializer):
     class Meta:
         model = models.MultiCliquePolicy
-        fields = ("name", "active")
+        fields = ("address", "name", "active")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # we don't want the unique validator here
+        self.fields["address"].validators.pop(0)
+
+    @staticmethod
+    def validate_name(value):
+        if value != "ELIO_DAO":
+            raise ValidationError('currently only "ELIO_DAO" is supported as policy preset')
+        return value
 
 
 class MultiCliqueSignatorySerializer(ModelSerializer):
@@ -45,7 +56,7 @@ class MultiCliqueSignatorySerializer(ModelSerializer):
 
 
 class MultiCliqueAccountSerializer(ModelSerializer):
-    policy = CharField(source="policy.name", help_text="e.g.: ELIO_DAO")
+    policy = MultiCliquePolicySerializer()
     signatories = MultiCliqueSignatorySerializer(many=True)
 
     class Meta:
@@ -56,7 +67,28 @@ class MultiCliqueAccountSerializer(ModelSerializer):
         super().__init__(*args, **kwargs)
         # we don't want the unique validators here
         self.fields["address"].validators.pop(0)
-        self.fields["policy"].validators.pop(0)
+
+    def create(self, validated_data):
+        signatories = models.MultiCliqueSignatory.objects.bulk_create(
+            [models.MultiCliqueSignatory(**entry) for entry in validated_data["signatories"]], ignore_conflicts=True
+        )
+        multiclique_acc, created = models.MultiCliqueAccount.objects.update_or_create(
+            address=validated_data["address"],
+            defaults={
+                "name": validated_data["name"],
+                "default_threshold": validated_data["default_threshold"],
+                "policy": models.MultiCliquePolicy.objects.update_or_create(
+                    address=validated_data["policy"]["address"],
+                    defaults={
+                        "name": validated_data["policy"]["name"],
+                        "active": validated_data["policy"].get("active"),
+                    },
+                )[0],
+            },
+        )
+        multiclique_acc.signatories.set(signatories)
+        multiclique_acc.save()
+        return multiclique_acc
 
 
 class MultiCliqueSignatureSerializer(Serializer):
@@ -185,17 +217,20 @@ class MultiCliqueAuthSerializer(Serializer):
     def validate(self, attrs):
         from core.soroban import soroban_service
 
-        if not (addr := attrs.get("address")):
+        if not (address := attrs.get("address")):
             raise ValidationError('Must include "multiclique_address".', code="authorization")
-        if not (sig := attrs.get("signature")):
+        if not (signature := attrs.get("signature")):
             raise ValidationError('Must include "signature".', code="authorization")
 
         try:
-            acc = models.MultiCliqueAccount.objects.get(address=addr)
+            acc = models.MultiCliqueAccount.objects.get(address=address)
         except models.MultiCliqueAccount.DoesNotExist:
             raise ValidationError("MultiCliqueAccount does not exist.", code="authorization")
 
-        if not soroban_service.verify(address=addr, challenge_address=addr, signature=sig):
+        if not any(
+            soroban_service.verify(address=addr, challenge_address=address, signature=signature)
+            for addr in (address, *acc.signatories.values_list("address", flat=True))
+        ):
             raise ValidationError("Signature does not match.", code="authorization")
 
         refresh = TokenObtainPairSerializer.get_token(acc)

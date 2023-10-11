@@ -459,8 +459,6 @@ class SorobanTest(IntegrationTestCase):
             data={
                 "core_contract_address": "a",
                 "votes_contract_address": "b",
-                "multiclique_contract_address": "c",
-                "policy_contract_address": "d",
                 "assets_wasm_hash": "e",
                 "blockchain_url": "f",
                 "network_passphrase": "g",
@@ -475,8 +473,6 @@ class SorobanTest(IntegrationTestCase):
                 new_config={
                     "core_contract_address": "1",
                     "votes_contract_address": "2",
-                    "multiclique_contract_address": "3",
-                    "policy_contract_address": "4",
                 },
             )
         self.assertEqual(
@@ -484,8 +480,6 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": "1",
                 "votes_contract_address": "2",
-                "multiclique_contract_address": "3",
-                "policy_contract_address": "4",
                 "assets_wasm_hash": "some_assets_wasm_hash",
                 "blockchain_url": "some_blockchain_url",
                 "network_passphrase": "some_network_passphrase",
@@ -506,8 +500,6 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": "a",
                 "votes_contract_address": "b",
-                "multiclique_contract_address": "c",
-                "policy_contract_address": "d",
                 "assets_wasm_hash": "e",
                 "blockchain_url": "f",
                 "network_passphrase": "g",
@@ -527,8 +519,6 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": 1,
                 "votes_contract_address": 2,
-                "multiclique_contract_address": "c",
-                "policy_contract_address": "d",
                 "assets_wasm_hash": 3,
                 "blockchain_url": 4,
                 "network_passphrase": "g",
@@ -551,8 +541,6 @@ class SorobanTest(IntegrationTestCase):
             {
                 "core_contract_address": "a1",
                 "votes_contract_address": "a2",
-                "multiclique_contract_address": "c",
-                "policy_contract_address": "d",
                 "assets_wasm_hash": 3,
                 "blockchain_url": 4,
                 "network_passphrase": "g",
@@ -570,8 +558,6 @@ class SorobanTest(IntegrationTestCase):
         with override_settings(
             CORE_CONTRACT_ADDRESS="a",
             VOTES_CONTRACT_ADDRESS="b",
-            MULTICLIQUE_CONTRACT_ADDRESS="c",
-            POLICY_CONTRACT_ADDRESS="d",
             ASSETS_WASM_HASH="e",
             BLOCKCHAIN_URL="f",
             NETWORK_PASSPHRASE="g",
@@ -592,11 +578,10 @@ class SorobanTest(IntegrationTestCase):
         models.Dao.objects.create(id="d2", contract_id="c2", owner_id="acc2")
         models.Asset.objects.create(id="a1", address="a1", dao_id="d1", owner_id="acc1", total_supply=0)
         models.Asset.objects.create(id="a2", address="a2", dao_id="d2", owner_id="acc2", total_supply=0)
+
         expected_ids = [
             b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
             b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
-            b"2e3b860a87361af06eed8ac7223a4f62a2c3a30eae9036638b3c5af5f2fd6a09",
-            b"aa83046d7034dabb01c97a76e8cb81214042fa61b64bb44ad38bbb4cc17ac061",
             "a1",
             "a2",
         ]
@@ -689,8 +674,6 @@ class SorobanTest(IntegrationTestCase):
                     contractIds=[
                         "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
                         "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
-                        "2e3b860a87361af06eed8ac7223a4f62a2c3a30eae9036638b3c5af5f2fd6a09",
-                        "aa83046d7034dabb01c97a76e8cb81214042fa61b64bb44ad38bbb4cc17ac061",
                     ],
                 )
             ],
@@ -818,8 +801,6 @@ class SorobanTest(IntegrationTestCase):
                     contractIds=[
                         "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
                         "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
-                        "2e3b860a87361af06eed8ac7223a4f62a2c3a30eae9036638b3c5af5f2fd6a09",
-                        "aa83046d7034dabb01c97a76e8cb81214042fa61b64bb44ad38bbb4cc17ac061",
                     ],
                 )
             ],
@@ -918,8 +899,6 @@ class SorobanTest(IntegrationTestCase):
         expected_config = {
             "core_contract_address": "a",
             "votes_contract_address": "b",
-            "multiclique_contract_address": "c",
-            "policy_contract_address": "d",
             "assets_wasm_hash": "some_assets_wasm_hash",
             "blockchain_url": "some_blockchain_url",
             "network_passphrase": "some_network_passphrase",
@@ -930,8 +909,6 @@ class SorobanTest(IntegrationTestCase):
             data={
                 "core_contract_address": "a",
                 "votes_contract_address": "b",
-                "multiclique_contract_address": "c",
-                "policy_contract_address": "d",
             }
         )
 

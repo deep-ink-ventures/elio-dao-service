@@ -1,11 +1,9 @@
 import json
 import logging
-import re
 import secrets
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
 from django.db.models import Prefetch
 from drf_yasg import openapi
 from drf_yasg.utils import swagger_auto_schema
@@ -108,36 +106,15 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
         request_body=serializers.MultiCliqueAccountSerializer,
         responses={
             200: openapi.Response("", serializers.MultiCliqueAccountSerializer),
-            201: openapi.Response("", serializers.MultiCliqueAccountSerializer),
         },
         security=[{"Basic": []}],
     )
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        serializer.save()
         data = serializer.data
-        # to UPPER_SNAKE_CASE
-        policy_name = re.sub(r"_+", "_", re.sub(r"[\s|\-|\.]+", "_", data["policy"].upper()))  # noqa
-        with transaction.atomic():
-            signatories = models.MultiCliqueSignatory.objects.bulk_create(
-                [models.MultiCliqueSignatory(**entry) for entry in data["signatories"]], ignore_conflicts=True
-            )
-            multiclique_acc, created = models.MultiCliqueAccount.objects.update_or_create(
-                address=data["address"],
-                defaults={
-                    "name": data["name"],
-                    "default_threshold": data["default_threshold"],
-                    "policy": models.MultiCliquePolicy.objects.get_or_create(name=policy_name)[0],
-                },
-            )
-            multiclique_acc.signatories.set(signatories)
-            multiclique_acc.save()
-        res_data = self.get_serializer(multiclique_acc).data
-        return Response(
-            data=res_data,
-            status=HTTP_201_CREATED if created else HTTP_200_OK,
-            headers=self.get_success_headers(data=res_data),
-        )
+        return Response(data=data, status=HTTP_200_OK, headers=self.get_success_headers(data=data))
 
     @swagger_auto_schema(
         method="GET",
@@ -271,11 +248,8 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Sear
 
         serializer = serializers.UpdateMultiCliqueTransactionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        data = serializer.data
 
-        txn = self.get_object()
-        # serializer = self.get_serializer(instance=txn)
-        serializer = self.get_serializer(instance=txn, data=data, partial=True)
+        serializer = self.get_serializer(instance=self.get_object(), data=serializer.data, partial=True)
         if not serializer.is_valid():
             slack_logger.error(serializer.errors)
             return Response(data={"error": "Error during Transaction update"}, status=HTTP_400_BAD_REQUEST)

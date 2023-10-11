@@ -5,7 +5,8 @@ from core.utils import ChoiceEnum
 
 
 class MultiCliquePolicy(TimestampableMixin):
-    name = models.CharField(primary_key=True, max_length=256)
+    address = models.CharField(primary_key=True, max_length=256)
+    name = models.CharField(max_length=256)
     active = models.BooleanField(default=False)
 
     class Meta:
@@ -59,9 +60,9 @@ class TransactionStatus(ChoiceEnum):
 
 class MultiCliqueTransaction(TimestampableMixin):
     xdr = models.CharField(max_length=4096)
-    nonce = models.BigIntegerField()
-    ledger = models.BigIntegerField()
-    preimage_hash = models.CharField(max_length=1024)
+    nonce = models.BigIntegerField(null=True)
+    ledger = models.BigIntegerField(null=True)
+    preimage_hash = models.CharField(max_length=1024, null=True)
     call_func = models.CharField(max_length=256, null=True)
     call_args = models.JSONField(null=True)
     multiclique_account = models.ForeignKey(MultiCliqueAccount, related_name="transactions", on_delete=models.CASCADE)

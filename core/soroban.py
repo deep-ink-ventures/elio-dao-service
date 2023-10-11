@@ -5,6 +5,7 @@ import os
 import time
 from collections import defaultdict
 from functools import wraps
+from itertools import chain
 from json import JSONDecodeError
 from logging import getLogger
 from typing import DefaultDict, Optional, Type
@@ -252,6 +253,7 @@ def update_transaction(
     if the transaction's rejection count prevents reaching the threshold:
         status is updated to TransactionStatus.REJECTED
     """
+    transaction.refresh_from_db()
     update_fields = []
     if transaction.approvals.count() >= transaction.multiclique_account.default_threshold:
         envelope = soroban_service.prepare_transaction(
@@ -344,7 +346,6 @@ class SorobanService(object):
         config = self.set_config()
         self.soroban = RobustSorobanServer(server_url=config["blockchain_url"])
         self.network_passphrase = config["network_passphrase"]
-        self.multiclique_addr = config["multiclique_contract_address"]
         self.signature_validity_period = round(settings.SIGNATURE_VALIDITY_PERIOD / settings.BLOCK_CREATION_INTERVAL)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -356,8 +357,8 @@ class SorobanService(object):
         latest_ledger: int,
     ) -> str:
         auth_addr = entry.credentials.address
-        auth_addr.signature_expiration_ledger = stellar_xdr.Uint32(latest_ledger + self.signature_validity_period)
         if auth_addr:
+            auth_addr.signature_expiration_ledger = stellar_xdr.Uint32(latest_ledger + self.signature_validity_period)
             preimage = stellar_xdr.HashIDPreimage(
                 type=stellar_xdr.EnvelopeType.ENVELOPE_TYPE_SOROBAN_AUTHORIZATION,
                 soroban_authorization=stellar_xdr.HashIDPreimageSorobanAuthorization(
@@ -417,13 +418,29 @@ class SorobanService(object):
             metadata = {}
         sim_txn = self.soroban.simulate_transaction(transaction_envelope=envelope)
         if sim_txn.error:
+            if sim_txn.events:
+                events = [stellar_xdr.DiagnosticEvent.from_xdr(event) for event in sim_txn.events]
+                event_data = []
+                for event in events:
+                    body = getattr(event.event.body, f"v{event.event.body.v}")
+                    event_data.append(
+                        {
+                            "data": unpack_sc(body.data),
+                            "topics": [unpack_sc(topic) for topic in body.topics],
+                        }
+                    )
+                metadata["event_data"] = event_data
+
             raise LoggedException(f"soroban.simulate_transaction failed: {sim_txn.error}", ctx=metadata)
+
         if sim_txn.results is None:
             raise LoggedException("soroban.simulate_transaction yielded no results", ctx=metadata)
+
         if len(sim_txn.results[0].auth) > 1:
             raise NotImplementedException(
                 "_simulate_transaction failed, multiple SorobanAuthorizationEntries", ctx=metadata
             )
+
         return sim_txn
 
     def analyze_transaction(self, obj: str | TransactionEnvelope) -> dict:
@@ -444,7 +461,8 @@ class SorobanService(object):
                 entry=auth_entry,
                 latest_ledger=sim_txn.latest_ledger,
             )
-            nonce = auth_entry.credentials.address.nonce.int64
+            if auth_entry.credentials.address:
+                nonce = auth_entry.credentials.address.nonce.int64
 
         return {
             **unpack_host_function(operation.host_function),
@@ -498,6 +516,7 @@ class SorobanService(object):
             raise LoggedException(f"prepare_transaction failed: {exc.simulate_transaction_response.error}")
 
         envelope.transaction.fee *= 2
+        envelope.transaction.soroban_data.refundable_fee.int64 *= 2
         envelope.transaction.soroban_data.resources.instructions.uint32 *= 2
         if keypair:
             envelope.sign(keypair)
@@ -603,6 +622,8 @@ class SorobanService(object):
 
         if sim_txn is None:
             sim_txn = self._simulate_transaction(envelope=envelope)
+
+        if ledger is None:
             ledger = sim_txn.latest_ledger
 
         auth_entry = stellar_xdr.SorobanAuthorizationEntry.from_xdr(sim_txn.results[0].auth[0])
@@ -612,7 +633,8 @@ class SorobanService(object):
             )
 
         auth_addr = auth_entry.credentials.address
-        auth_addr.nonce = stellar_xdr.Int64(nonce)
+        if nonce is not None:
+            auth_addr.nonce = stellar_xdr.Int64(nonce)
         auth_addr.signature_expiration_ledger = stellar_xdr.Uint32(ledger + self.signature_validity_period)
         auth_addr.signature = signature_data
         operation.auth = [auth_entry]
@@ -632,9 +654,6 @@ class SorobanService(object):
         base_fee=100,
         timeout=300,
     ):
-        if contract_addr is None:
-            contract_addr = self.multiclique_addr
-
         return (
             TransactionBuilder(
                 source_account=self.soroban.load_account(source_account),
@@ -655,7 +674,7 @@ class SorobanService(object):
         func_name: str,
         func_args: list,
         signers: [Keypair],
-        contract_addr: str = None,
+        contract_addr: str,
         base_fee=100,
         timeout=300,
     ):
@@ -672,7 +691,7 @@ class SorobanService(object):
             base_fee=base_fee,
             timeout=timeout,
         )
-        sim_txn = self._simulate_transaction(envelope=envelope)
+        sim_txn = self._simulate_transaction(envelope=envelope, metadata=metadata)
         if auth := sim_txn.results[0].auth:
             preimage_hash = self.create_preimage_hash(
                 entry=stellar_xdr.SorobanAuthorizationEntry.from_xdr(auth[0]),
@@ -765,8 +784,6 @@ class SorobanService(object):
         data = {
             "core_contract_address": settings.CORE_CONTRACT_ADDRESS,
             "votes_contract_address": settings.VOTES_CONTRACT_ADDRESS,
-            "multiclique_contract_address": settings.MULTICLIQUE_CONTRACT_ADDRESS,
-            "policy_contract_address": settings.POLICY_CONTRACT_ADDRESS,
             "assets_wasm_hash": settings.ASSETS_WASM_HASH,
             "multiclique_wasm_hash": settings.MULTICLIQUE_WASM_HASH,
             "policy_wasm_hash": settings.POLICY_WASM_HASH,
@@ -783,8 +800,8 @@ class SorobanService(object):
         sets "trusted_contract_ids" to
             cache["config"]["core_contract_address"],
             cache["config"]["votes_contract_address"],
-            cache["config"]["multiclique_contract_address"],
-            cache["config"]["policy_contract_address"],
+            all MultiCliqueAccount IDs,
+            all MultiCliquePolicy IDs,
             all Asset IDs
 
         Returns:
@@ -793,17 +810,10 @@ class SorobanService(object):
         config = self.set_config()
 
         trusted_contract_ids = [
-            *[
-                binascii.hexlify(StrKey.decode_contract(config[addr]))
-                for addr in (
-                    "core_contract_address",
-                    "votes_contract_address",
-                    "multiclique_contract_address",
-                    "policy_contract_address",
-                )
-                if config[addr]
-            ],
+            binascii.hexlify(StrKey.decode_contract(config["core_contract_address"])),
+            binascii.hexlify(StrKey.decode_contract(config["votes_contract_address"])),
             *core_models.Asset.objects.values_list("id", flat=True),
+            *list(chain(*multiclique_models.MultiCliqueAccount.objects.values_list("address", "policy_id"))),
         ]
         cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
         return trusted_contract_ids

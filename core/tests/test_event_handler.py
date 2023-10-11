@@ -175,7 +175,7 @@ class EventHandlerTest(IntegrationTestCase):
             ),
         ]
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(4):
             soroban_event_handler._create_assets(event_data=event_data)
 
         self.assertModelsEqual(models.Asset.objects.all(), expected_assets)
