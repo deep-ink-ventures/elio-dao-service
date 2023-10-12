@@ -33,7 +33,6 @@ expected_dao1_res = {
     "name": "dao1 name",
     "creator_id": "acc1",
     "owner_id": "acc1",
-    "asset_id": "1",
     "asset_address": "a1",
     "proposal_duration": 10,
     "proposal_token_deposit": 123,
@@ -49,7 +48,6 @@ expected_dao2_res = {
     "name": "dao2 name",
     "creator_id": "acc2",
     "owner_id": "acc2",
-    "asset_id": "2",
     "asset_address": "a2",
     "proposal_duration": 15,
     "proposal_token_deposit": 234,
@@ -91,13 +89,13 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Governance.objects.create(
             dao_id="dao2", proposal_duration=15, proposal_token_deposit=234, min_threshold_configuration=45
         )
-        models.Asset.objects.create(id="1", address="a1", owner_id="acc1", dao_id="dao1", total_supply=1000)
-        models.Asset.objects.create(id="2", address="a2", owner_id="acc2", dao_id="dao2", total_supply=200)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc1", balance=500)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc2", balance=300)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc3", balance=100)
-        models.AssetHolding.objects.create(asset_id=1, owner_id="acc4", balance=100)
-        models.AssetHolding.objects.create(asset_id=2, owner_id="acc2", balance=200)
+        models.Asset.objects.create(address="a1", owner_id="acc1", dao_id="dao1", total_supply=1000)
+        models.Asset.objects.create(address="a2", owner_id="acc2", dao_id="dao2", total_supply=200)
+        models.AssetHolding.objects.create(asset_id="a1", owner_id="acc1", balance=500)
+        models.AssetHolding.objects.create(asset_id="a1", owner_id="acc2", balance=300)
+        models.AssetHolding.objects.create(asset_id="a1", owner_id="acc3", balance=100)
+        models.AssetHolding.objects.create(asset_id="a1", owner_id="acc4", balance=100)
+        models.AssetHolding.objects.create(asset_id="a2", owner_id="acc2", balance=200)
         models.Proposal.objects.create(
             id="prop1",
             dao_id="dao1",
@@ -306,7 +304,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "3",
                     "creator_id": "acc1",
                     "owner_id": "acc2",
-                    "asset_id": None,
                     "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -327,7 +324,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "3",
                     "creator_id": "acc1",
                     "owner_id": "acc2",
-                    "asset_id": None,
                     "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -352,7 +348,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "3",
                     "creator_id": "acc1",
                     "owner_id": "acc2",
-                    "asset_id": None,
                     "asset_address": None,
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -389,7 +384,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
-                    "asset_id": "4",
                     "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -406,7 +400,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
-                    "asset_id": "3",
                     "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -429,7 +422,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
-                    "asset_id": "4",
                     "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -445,7 +437,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
-                    "asset_id": "3",
                     "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -470,7 +461,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao4 name",
                     "creator_id": "acc2",
                     "owner_id": "acc2",
-                    "asset_id": "4",
                     "asset_address": "a4",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -487,7 +477,6 @@ class CoreViewSetTest(IntegrationTestCase):
                     "name": "dao3 name",
                     "creator_id": "acc1",
                     "owner_id": "acc1",
-                    "asset_id": "3",
                     "asset_address": "a3",
                     "proposal_duration": None,
                     "proposal_token_deposit": None,
@@ -509,10 +498,10 @@ class CoreViewSetTest(IntegrationTestCase):
         models.Dao.objects.create(
             id="dao4", contract_id="contract4", name="dao4 name", creator_id="acc2", owner_id="acc2"
         )
-        models.Asset.objects.create(id="3", address="a3", owner_id="acc1", dao_id="dao3", total_supply=100)
-        models.Asset.objects.create(id="4", address="a4", owner_id="acc2", dao_id="dao4", total_supply=200)
-        models.AssetHolding.objects.create(asset_id="3", owner_id="acc3", balance=100)
-        models.AssetHolding.objects.create(asset_id="4", owner_id="acc3", balance=200)
+        models.Asset.objects.create(address="a3", owner_id="acc1", dao_id="dao3", total_supply=100)
+        models.Asset.objects.create(address="a4", owner_id="acc2", dao_id="dao4", total_supply=200)
+        models.AssetHolding.objects.create(asset_id="a3", owner_id="acc3", balance=100)
+        models.AssetHolding.objects.create(asset_id="a4", owner_id="acc3", balance=200)
 
         expected_res = wrap_in_pagination_res(expected_res)
 
@@ -664,18 +653,18 @@ class CoreViewSetTest(IntegrationTestCase):
         )
 
     def test_asset_get(self):
-        expected_res = {"id": "1", "address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
+        expected_res = {"address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000}
 
         with self.assertNumQueries(1):
-            res = self.client.get(reverse("core-asset-detail", kwargs={"pk": 1}))
+            res = self.client.get(reverse("core-asset-detail", kwargs={"pk": "a1"}))
 
         self.assertDictEqual(res.data, expected_res)
 
     def test_asset_get_list(self):
         expected_res = wrap_in_pagination_res(
             [
-                {"id": "1", "address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
-                {"id": "2", "address": "a2", "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
+                {"address": "a1", "dao_id": "dao1", "owner_id": "acc1", "total_supply": 1000},
+                {"address": "a2", "dao_id": "dao2", "owner_id": "acc2", "total_supply": 200},
             ]
         )
         with self.assertNumQueries(2):
@@ -802,7 +791,7 @@ class CoreViewSetTest(IntegrationTestCase):
         cache.set(key="acc1", value=self.challenge_key, timeout=5)
         signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
         acc = models.Account.objects.create(address=keypair.public_key)
-        models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
+        models.AssetHolding.objects.create(owner=acc, asset_id="a1", balance=10)
         proposal_id = "prop1"
         post_data = {"reason": "very good reason"}
 
@@ -849,7 +838,7 @@ class CoreViewSetTest(IntegrationTestCase):
         cache.set(key="acc1", value=self.challenge_key, timeout=5)
         signature = base64.b64encode(keypair.sign(data=self.challenge_key.encode())).decode()
         acc = models.Account.objects.create(address=keypair.public_key)
-        models.AssetHolding.objects.create(owner=acc, asset_id=1, balance=10)
+        models.AssetHolding.objects.create(owner=acc, asset_id="a1", balance=10)
         proposal_id = "prop1"
         post_data = {"reason": "very good reason", "proposal_id": proposal_id}
 

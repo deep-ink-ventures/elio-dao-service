@@ -69,7 +69,6 @@ class AccountSerializerList(ModelSerializer):
 
 class DaoSerializer(ModelSerializer):
     owner_id = CharField(required=True)
-    asset_id = CharField(source="asset.id", required=False)
     asset_address = CharField(source="asset.address", required=False)
     proposal_duration = IntegerField(source="governance.proposal_duration", help_text="Proposal duration in blocks.")
     proposal_token_deposit = IntegerField(
@@ -90,7 +89,6 @@ class DaoSerializer(ModelSerializer):
             "contract_id",
             "creator_id",
             "owner_id",
-            "asset_id",
             "asset_address",
             "proposal_duration",
             "proposal_token_deposit",
@@ -149,7 +147,6 @@ class DaoMetadataResponseSerializer(Serializer):  # noqa
 
 
 class AssetSerializer(ModelSerializer):
-    id = CharField(required=True)
     address = CharField(required=True)
     dao_id = CharField(required=True)
     owner_id = CharField(required=True)
@@ -157,18 +154,17 @@ class AssetSerializer(ModelSerializer):
 
     class Meta:
         model = models.Asset
-        fields = ("id", "address", "dao_id", "owner_id", "total_supply")
+        fields = ("address", "dao_id", "owner_id", "total_supply")
 
 
 class AssetHoldingSerializer(ModelSerializer):
-    asset_id = CharField(required=True)
     asset_address = CharField(source="asset.address", required=True)
     owner_id = CharField(required=True)
     balance = IntegerField(min_value=0)
 
     class Meta:
         model = models.AssetHolding
-        fields = ("id", "asset_id", "asset_address", "owner_id", "balance")
+        fields = ("id", "asset_address", "owner_id", "balance")
 
 
 class VotesSerializer(Serializer):  # noqa

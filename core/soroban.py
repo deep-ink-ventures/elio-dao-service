@@ -5,7 +5,6 @@ import os
 import time
 from collections import defaultdict
 from functools import wraps
-from itertools import chain
 from json import JSONDecodeError
 from logging import getLogger
 from typing import DefaultDict, Optional, Type
@@ -627,10 +626,8 @@ class SorobanService(object):
             ledger = sim_txn.latest_ledger
 
         auth_entry = stellar_xdr.SorobanAuthorizationEntry.from_xdr(sim_txn.results[0].auth[0])
-        if auth_entry.credentials.type != stellar_xdr.SorobanCredentialsType.SOROBAN_CREDENTIALS_ADDRESS:
-            raise NotImplementedException(
-                f"authorize_transaction failed, invalid credentials type: {auth_entry.credentials.type}"
-            )
+        if auth_entry.credentials.type == stellar_xdr.SorobanCredentialsType.SOROBAN_CREDENTIALS_SOURCE_ACCOUNT:
+            return envelope
 
         auth_addr = auth_entry.credentials.address
         if nonce is not None:
@@ -810,10 +807,11 @@ class SorobanService(object):
         config = self.set_config()
 
         trusted_contract_ids = [
-            binascii.hexlify(StrKey.decode_contract(config["core_contract_address"])),
-            binascii.hexlify(StrKey.decode_contract(config["votes_contract_address"])),
-            *core_models.Asset.objects.values_list("id", flat=True),
-            *list(chain(*multiclique_models.MultiCliqueAccount.objects.values_list("address", "policy_id"))),
+            config["core_contract_address"],
+            config["votes_contract_address"],
+            *core_models.Asset.objects.values_list("address", flat=True),
+            *multiclique_models.MultiCliqueAccount.objects.values_list("address", flat=True),
+            *multiclique_models.MultiCliquePolicy.objects.values_list("address", flat=True),
         ]
         cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
         return trusted_contract_ids

@@ -46,6 +46,7 @@ from core.soroban import (
     unpack_sc,
 )
 from core.tests.testcases import IntegrationTestCase
+from multiclique import models as multiclique_models
 
 
 class BreakRetry(Exception):
@@ -406,7 +407,7 @@ class SorobanTest(IntegrationTestCase):
         models.Contract.objects.create(id="c1")
         models.Account.objects.create(address="acc1")
         models.Dao.objects.create(id="dao1", contract_id="c1", name="dao1 name", owner_id="acc1")
-        models.Asset.objects.create(id="a1", address="a1", owner_id="acc1", dao_id="dao1", total_supply=100)
+        models.Asset.objects.create(address="a1", owner_id="acc1", dao_id="dao1", total_supply=100)
         models.AssetHolding.objects.create(asset_id="a1", owner_id="acc1", balance=100)
         models.Proposal.objects.create(
             id="prop1",
@@ -576,14 +577,22 @@ class SorobanTest(IntegrationTestCase):
         models.Contract.objects.create(id="c2")
         models.Dao.objects.create(id="d1", contract_id="c1", owner_id="acc1")
         models.Dao.objects.create(id="d2", contract_id="c2", owner_id="acc2")
-        models.Asset.objects.create(id="a1", address="a1", dao_id="d1", owner_id="acc1", total_supply=0)
-        models.Asset.objects.create(id="a2", address="a2", dao_id="d2", owner_id="acc2", total_supply=0)
+        models.Asset.objects.create(address="a1", dao_id="d1", owner_id="acc1", total_supply=0)
+        models.Asset.objects.create(address="a2", dao_id="d2", owner_id="acc2", total_supply=0)
+        multiclique_models.MultiCliquePolicy.objects.create(address="POL1", name="pol1")
+        multiclique_models.MultiCliquePolicy.objects.create(address="POL2", name="pol2")
+        multiclique_models.MultiCliqueAccount.objects.create(address="ACC1")
+        multiclique_models.MultiCliqueAccount.objects.create(address="ACC2")
 
         expected_ids = [
-            b"d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
-            b"1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+            "CDLUQRW6EXSX4SPXC4WTC3SD5KZE2BHDKPMMKJR4FOPGED4NPKKZ4C4Q",
+            "CAPYKFOCLMWWLZRHF65RNARHTMALMBNUPT3EITOEGRZ6TYSA3BV43WMV",
             "a1",
             "a2",
+            "ACC1",
+            "ACC2",
+            "POL1",
+            "POL2",
         ]
 
         ids = soroban_service.set_trusted_contract_ids()
@@ -672,8 +681,8 @@ class SorobanTest(IntegrationTestCase):
             filters=[
                 EventFilter(
                     contractIds=[
-                        "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
-                        "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+                        "CDLUQRW6EXSX4SPXC4WTC3SD5KZE2BHDKPMMKJR4FOPGED4NPKKZ4C4Q",
+                        "CAPYKFOCLMWWLZRHF65RNARHTMALMBNUPT3EITOEGRZ6TYSA3BV43WMV",
                     ],
                 )
             ],
@@ -799,8 +808,8 @@ class SorobanTest(IntegrationTestCase):
             filters=[
                 EventFilter(
                     contractIds=[
-                        "d74846de25e57e49f7172d316e43eab24d04e353d8c5263c2b9e620f8d7a959e",
-                        "1f8515c25b2d65e6272fbb1682279b00b605b47cf6444dc43473e9e240d86bcd",
+                        "CDLUQRW6EXSX4SPXC4WTC3SD5KZE2BHDKPMMKJR4FOPGED4NPKKZ4C4Q",
+                        "CAPYKFOCLMWWLZRHF65RNARHTMALMBNUPT3EITOEGRZ6TYSA3BV43WMV",
                     ],
                 )
             ],

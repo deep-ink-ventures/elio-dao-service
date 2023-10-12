@@ -1,4 +1,3 @@
-import binascii
 import collections
 import logging
 from functools import partial, reduce
@@ -8,7 +7,6 @@ from typing import DefaultDict
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.db.models import Q
-from stellar_sdk import StrKey
 
 from core import models, tasks
 
@@ -135,7 +133,6 @@ class SorobanEventHandler:
             )
             assets.append(
                 models.Asset(
-                    id=binascii.hexlify(StrKey.decode_contract(asset_id)).decode(),
                     address=asset_id,
                     dao_id=dao_id,
                     owner_id=owner_id,
@@ -145,7 +142,7 @@ class SorobanEventHandler:
             asset_holdings.append(models.AssetHolding(asset_id=asset_id, owner_id=owner_id, balance=0))
         if assets:
             for asset_holding_obj, asset in zip(asset_holdings, models.Asset.objects.bulk_create(assets)):
-                asset_holding_obj.asset_id = asset.id
+                asset_holding_obj.asset_id = asset.address
             models.AssetHolding.objects.bulk_create(asset_holdings)
             soroban_service.set_trusted_contract_ids()
 
@@ -159,8 +156,8 @@ class SorobanEventHandler:
         """
         # there is only one data entry (amount, owner_id) per asset
         data = {asset_id: data[0] for asset_id, data in event_data.items()}
-        for asset in (assets := models.Asset.objects.filter(id__in=data.keys())):
-            asset.total_supply = data[asset.id]["amount"]
+        for asset in (assets := models.Asset.objects.filter(address__in=data.keys())):
+            asset.total_supply = data[asset.address]["amount"]
 
         for asset_holding in (asset_holdings := models.AssetHolding.objects.filter(asset_id__in=data.keys())):
             asset_holding_data = data[asset_holding.asset_id]
@@ -181,19 +178,19 @@ class SorobanEventHandler:
         rephrase: transfers ownership of an amount of tokens (models.AssetHolding) from one Account to another
         """
         asset_holding_data = []  # [(asset_id, amount, from_acc, to_acc), ...]
-        asset_ids_to_owner_ids: DefaultDict = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
-        asset_id: str
+        asset_addrs_to_owner_ids: DefaultDict = collections.defaultdict(set)  # {1 (asset_id): {1, 2, 3} (owner_ids)...}
+        asset_address: str
         accs = set()
         # contract_id becomes asset_id
-        for asset_id, transfers in event_data.items():
+        for asset_address, transfers in event_data.items():
             for transfer in transfers:
                 amount, from_acc, to_acc = transfer["amount"], transfer["owner_id"], transfer["new_owner_id"]
-                asset_holding_data.append((asset_id, amount, from_acc, to_acc))
-                asset_ids_to_owner_ids[asset_id].add(from_acc)
-                asset_ids_to_owner_ids[asset_id].add(to_acc)
+                asset_holding_data.append((asset_address, amount, from_acc, to_acc))
+                asset_addrs_to_owner_ids[asset_address].add(from_acc)
+                asset_addrs_to_owner_ids[asset_address].add(to_acc)
                 accs.add(models.Account(address=to_acc))
         if asset_holding_data:
-            models.Dao.objects.filter(asset__in=asset_ids_to_owner_ids.keys(), setup_complete=False).update(
+            models.Dao.objects.filter(asset__in=asset_addrs_to_owner_ids.keys(), setup_complete=False).update(
                 setup_complete=True
             )
             models.Account.objects.bulk_create(accs, ignore_conflicts=True)
@@ -208,26 +205,26 @@ class SorobanEventHandler:
                     Q.__or__,
                     [
                         Q(asset_id=asset_id, owner_id__in=owner_ids)
-                        for asset_id, owner_ids in asset_ids_to_owner_ids.items()
+                        for asset_id, owner_ids in asset_addrs_to_owner_ids.items()
                     ],
                 )
             ):
                 existing_holdings[asset_holding.asset_id][asset_holding.owner_id] = asset_holding
 
             asset_holdings_to_create = {}
-            for asset_id, amount, from_acc, to_acc in asset_holding_data:
+            for asset_address, amount, from_acc, to_acc in asset_holding_data:
                 # subtract transferred amount from existing models.AssetHolding
-                existing_holdings[asset_id][from_acc].balance -= amount
+                existing_holdings[asset_address][from_acc].balance -= amount
 
                 #  add transferred amount if models.AssetHolding already exists
-                if to_acc_holding := asset_holdings_to_create.get((asset_id, to_acc)):
+                if to_acc_holding := asset_holdings_to_create.get((asset_address, to_acc)):
                     to_acc_holding.balance += amount
-                elif to_acc_holding := existing_holdings.get(asset_id, {}).get(to_acc):
+                elif to_acc_holding := existing_holdings.get(asset_address, {}).get(to_acc):
                     to_acc_holding.balance += amount
                 # otherwise create a new models.AssetHolding with balance = transferred amount
                 else:
-                    asset_holdings_to_create[(asset_id, to_acc)] = models.AssetHolding(
-                        owner_id=to_acc, asset_id=asset_id, balance=amount
+                    asset_holdings_to_create[(asset_address, to_acc)] = models.AssetHolding(
+                        owner_id=to_acc, asset_id=asset_address, balance=amount
                     )
             models.AssetHolding.objects.bulk_update(
                 [holding for acc_to_holding in existing_holdings.values() for holding in acc_to_holding.values()],
@@ -291,14 +288,14 @@ class SorobanEventHandler:
             models.Account.objects.bulk_create(
                 [models.Account(address=acc_id) for acc_id in acc_ids], ignore_conflicts=True
             )
-            dao_id_to_asset_id = {
-                vals["dao_id"]: vals["id"]
-                for vals in models.Asset.objects.filter(dao_id__in=dao_ids).values("id", "dao_id")
+            dao_id_to_asset_addr = {
+                vals["dao_id"]: vals["address"]
+                for vals in models.Asset.objects.filter(dao_id__in=dao_ids).values("address", "dao_id")
             }
             models.AssetHolding.objects.bulk_create(
                 [
                     models.AssetHolding(
-                        owner_id=proposal.creator_id, asset_id=dao_id_to_asset_id[proposal.dao_id], balance=0
+                        owner_id=proposal.creator_id, asset_id=dao_id_to_asset_addr[proposal.dao_id], balance=0
                     )
                     for proposal in proposals
                 ],
