@@ -10,7 +10,7 @@ class MultiCliquePolicy(TimestampableMixin):
     active = models.BooleanField(default=False)
 
     class Meta:
-        db_table = "multiclique_policies"
+        db_table = "multiclique_policy"
         verbose_name = "MultiClique Policy"
         verbose_name_plural = "MultiClique Policies"
 
@@ -43,7 +43,7 @@ class MultiCliqueAccount(TimestampableMixin):
     policy = models.ForeignKey(MultiCliquePolicy, on_delete=models.SET_NULL, null=True)
 
     class Meta:
-        db_table = "multiclique_accounts"
+        db_table = "multiclique_account"
         verbose_name = "MultiClique Account"
         verbose_name_plural = " MultiClique Accounts"
 
@@ -73,7 +73,7 @@ class MultiCliqueTransaction(TimestampableMixin):
     # todo find unique id
 
     class Meta:
-        db_table = "multiclique_transactions"
+        db_table = "multiclique_transaction"
         verbose_name = "MultiClique Transaction"
         verbose_name_plural = "MultiClique Transactions"
 

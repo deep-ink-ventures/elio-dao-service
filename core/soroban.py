@@ -761,6 +761,10 @@ class SorobanService(object):
                 truncate core_block;
                 truncate core_account cascade;
                 truncate core_contract cascade;
+                truncate multiclique_policy cascade;
+                truncate multiclique_signatory cascade;
+                truncate multiclique_signature cascade;
+                truncate multiclique_account cascade;
                 """
             )
         cache.set(key="restart_listener", value=True)

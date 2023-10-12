@@ -427,6 +427,12 @@ class SorobanTest(IntegrationTestCase):
         models.Vote.objects.create(voter_id="acc1", proposal_id="prop1", in_favor=True, voting_power=10)
         models.ProposalReport.objects.create(proposal_id="prop1", reason="good reason")
         models.Block.objects.create(number=1)
+        multiclique_models.MultiCliquePolicy.objects.create(address="POL1", name="pol1")
+        multiclique_models.MultiCliqueSignatory.objects.create(address="SIG1")
+        multiclique_models.MultiCliqueSignature.objects.create(signature="sig1", signatory_id="SIG1")
+        multiclique_models.MultiCliqueAccount.objects.create(address="ACC1", default_threshold=1, policy_id="POL1")
+        multiclique_models.MultiCliqueTransaction.objects.create(xdr="xdr", multiclique_account_id="ACC1")
+
         with connection.cursor() as cursor:
             cursor.execute("SET CONSTRAINTS ALL IMMEDIATE;")
         cache.set(key="some_key", value=1)
@@ -451,6 +457,11 @@ class SorobanTest(IntegrationTestCase):
             models.ProposalReport,
             models.Vote,
             models.Governance,
+            multiclique_models.MultiCliqueAccount,
+            multiclique_models.MultiCliquePolicy,
+            multiclique_models.MultiCliqueSignatory,
+            multiclique_models.MultiCliqueSignature,
+            multiclique_models.MultiCliqueTransaction,
         ):
             self.assertListEqual(list(model.objects.all()), [])
 
