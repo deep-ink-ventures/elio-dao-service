@@ -247,7 +247,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertListEqual([entry["address"] for entry in res.json()["results"]], expected_res)
 
-    def test_multiclique_account_create(self):
+    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
+    def test_multiclique_account_create(self, set_trusted_contract_ids_mock):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
@@ -316,8 +317,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             models.MultiCliqueSignatory(address="pk6", name="signer6"),
         ]
         self.assertModelsEqual(models.MultiCliqueSignatory.objects.order_by("address"), expected_sigs)
+        set_trusted_contract_ids_mock.assert_called_once_with()
 
-    def test_multiclique_account_create_existing_account(self):
+    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
+    def test_multiclique_account_create_existing_account(self, set_trusted_contract_ids_mock):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
@@ -376,8 +379,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         )
         self.assertModelsEqual(mc3.signatories.all(), [self.signer1, self.signer2, self.signer3, self.signer4])
         self.assertModelsEqual(models.MultiCliqueAccount.objects.order_by("address"), [self.mc1, self.mc2, mc3])
+        set_trusted_contract_ids_mock.assert_called_once_with()
 
-    def test_multiclique_account_create_existing_policy(self):
+    @patch("core.soroban.SorobanService.set_trusted_contract_ids")
+    def test_multiclique_account_create_existing_policy(self, set_trusted_contract_ids_mock):
         expected_res = {
             "address": "addr2",
             "name": "acc1",
@@ -411,6 +416,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
+        set_trusted_contract_ids_mock.assert_called_once_with()
 
     def test_multiclique_account_create_invalid(self):
         expected_res = {"name": ["This field is required."], "policy": {"name": ["This field is required."]}}

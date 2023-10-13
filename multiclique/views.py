@@ -110,9 +110,12 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
         security=[{"Basic": []}],
     )
     def create(self, request, *args, **kwargs):
+        from core.soroban import soroban_service
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        soroban_service.set_trusted_contract_ids()
         data = serializer.data
         return Response(data=data, status=HTTP_200_OK, headers=self.get_success_headers(data=data))
 
