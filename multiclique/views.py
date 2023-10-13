@@ -175,7 +175,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
 class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, SearchableMixin):
     queryset = models.MultiCliqueTransaction.objects.all()
     serializer_class = serializers.MultiCliqueTransactionSerializer
-    filter_fields = ["xdr", "multiclique_account__address"]
+    filter_fields = ["xdr"]
     ordering_fields = ["call_func", "status", "executed_at"]
     permission_classes = [IsAuthenticated]
 
@@ -206,7 +206,7 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Sear
         try:
             xdr_data = soroban_service.analyze_transaction(obj=(xdr := data["xdr"]))
         except SorobanException as exc:
-            return Response(data={"error": exc.msg}, status=HTTP_400_BAD_REQUEST)
+            return Response(data={**exc.ctx, "error": str(exc)}, status=HTTP_400_BAD_REQUEST)
 
         try:
             acc = models.MultiCliqueAccount.objects.get(address=request.user.id)

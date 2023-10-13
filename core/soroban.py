@@ -287,7 +287,7 @@ class SorobanException(Exception):
 
     def __init__(self, msg=None, ctx=None):
         self.ctx = ctx or {}
-        super().__init__((self.msg,) if not msg else msg)
+        super().__init__(self.msg if not msg else msg)
 
 
 class LoggedException(SorobanException):
@@ -422,9 +422,13 @@ class SorobanService(object):
                 event_data = []
                 for event in events:
                     body = getattr(event.event.body, f"v{event.event.body.v}")
+                    data = unpack_sc(body.data)
+                    if isinstance(data, list):
+                        if data[0] == "failing with contract error" and len(data) == 2:
+                            metadata["contract_error"] = data[1]
                     event_data.append(
                         {
-                            "data": unpack_sc(body.data),
+                            "data": data,
                             "topics": [unpack_sc(topic) for topic in body.topics],
                         }
                     )

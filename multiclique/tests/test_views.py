@@ -759,7 +759,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
     @patch("core.soroban.soroban_service.analyze_transaction")
     def test_multiclique_transaction_create_invalid_xdr(self, analyze_transaction_mock):
         analyze_transaction_mock.side_effect = InvalidXDRException(ctx={"some": "ctx"})
-        expected_res = {"error": "The XDR is invalid."}
+        expected_res = {"error": "The XDR is invalid.", "some": "ctx"}
 
         with self.assertNumQueries(0):
             res = self.client.post(
