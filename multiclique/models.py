@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models import Q, UniqueConstraint
 
 from core.models import TimestampableMixin
 from core.utils import ChoiceEnum
@@ -59,7 +60,7 @@ class TransactionStatus(ChoiceEnum):
 
 
 class MultiCliqueTransaction(TimestampableMixin):
-    xdr = models.CharField(max_length=4096)
+    xdr = models.CharField(max_length=4096, null=True)
     nonce = models.BigIntegerField(null=True)
     ledger = models.BigIntegerField(null=True)
     preimage_hash = models.CharField(max_length=1024, null=True)
@@ -76,6 +77,16 @@ class MultiCliqueTransaction(TimestampableMixin):
         db_table = "multiclique_transaction"
         verbose_name = "MultiClique Transaction"
         verbose_name_plural = "MultiClique Transactions"
+        constraints = [
+            UniqueConstraint(
+                name="unique_with_optional", fields=["call_func", "call_args", "multiclique_account", "executed_at"]
+            ),
+            UniqueConstraint(
+                name="unique_without_optional",
+                fields=["call_func", "call_args", "multiclique_account"],
+                condition=Q(executed_at=None),
+            ),
+        ]
 
     def __str__(self):
         return f"XDR: {self.xdr[:20]}..."

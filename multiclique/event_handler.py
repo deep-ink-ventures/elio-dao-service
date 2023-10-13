@@ -3,6 +3,7 @@ from functools import reduce
 from itertools import chain
 
 from django.db.models import Q
+from django.utils.timezone import now
 
 from multiclique import models
 
@@ -17,6 +18,10 @@ class MultiCliqueEventHandler:
             ("SIGNER", "added"): self._add_signer,
             ("SIGNER", "removed"): self._rm_signer,
         }
+
+    def _update_transactions(self, txn_kwargs):
+        # todo refactor
+        pass
 
     @staticmethod
     def _init_multiclique_contract(event_data: dict[list[dict]], **_):
@@ -62,6 +67,27 @@ class MultiCliqueEventHandler:
 
         if acc_to_sigs:
             models.MultiCliqueSignatory.objects.bulk_create(chain(*acc_to_sigs.values()), ignore_conflicts=True)
+            models.MultiCliqueTransaction.objects.bulk_create(
+                [
+                    models.MultiCliqueTransaction(
+                        multiclique_account_id=addr, call_func="add_signer", call_args=[sig.address]
+                    )
+                    for addr, sigs in acc_to_sigs.items()
+                    for sig in sigs
+                ],
+                ignore_conflicts=True,
+            )
+            models.MultiCliqueTransaction.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [
+                        Q(multiclique_account_id=addr, call_func="add_signer", call_args=[sig.address])
+                        for addr, sigs in acc_to_sigs.items()
+                        for sig in sigs
+                    ],
+                ),
+                executed_at__isnull=True,
+            ).update(status=models.TransactionStatus.EXECUTED, executed_at=now())
             m2m = models.MultiCliqueAccount.signatories.through
             m2m.objects.bulk_create(
                 [
@@ -86,6 +112,27 @@ class MultiCliqueEventHandler:
                 acc_to_sigs[contract_id].append(models.MultiCliqueSignatory(address=event["signer"]))
 
         if acc_to_sigs:
+            models.MultiCliqueTransaction.objects.bulk_create(
+                [
+                    models.MultiCliqueTransaction(
+                        multiclique_account_id=addr, call_func="remove_signer", call_args=[sig.address]
+                    )
+                    for addr, sigs in acc_to_sigs.items()
+                    for sig in sigs
+                ],
+                ignore_conflicts=True,
+            )
+            models.MultiCliqueTransaction.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [
+                        Q(multiclique_account_id=addr, call_func="remove_signer", call_args=[sig.address])
+                        for addr, sigs in acc_to_sigs.items()
+                        for sig in sigs
+                    ],
+                ),
+                executed_at__isnull=True,
+            ).update(status=models.TransactionStatus.EXECUTED, executed_at=now())
             models.MultiCliqueAccount.signatories.through.objects.filter(
                 # WHERE (
                 #     (multicliqueaccount_id = 1 AND multicliquesignatory_id IN (3, 4))
@@ -115,6 +162,31 @@ class MultiCliqueEventHandler:
 
         if accs:
             models.MultiCliqueAccount.objects.bulk_update(accs.values(), ["default_threshold"])
+            models.MultiCliqueTransaction.objects.bulk_create(
+                [
+                    models.MultiCliqueTransaction(
+                        multiclique_account_id=addr,
+                        call_func="set_default_threshold",
+                        call_args=[acc.default_threshold],
+                    )
+                    for addr, acc in accs.items()
+                ],
+                ignore_conflicts=True,
+            )
+            models.MultiCliqueTransaction.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [
+                        Q(
+                            multiclique_account_id=addr,
+                            call_func="set_default_threshold",
+                            call_args=[acc.default_threshold],
+                        )
+                        for addr, acc in accs.items()
+                    ],
+                ),
+                executed_at__isnull=True,
+            ).update(status=models.TransactionStatus.EXECUTED, executed_at=now())
 
 
 multiclique_event_handler = MultiCliqueEventHandler()
