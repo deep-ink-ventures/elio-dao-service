@@ -454,8 +454,12 @@ class SorobanService(object):
         Returns:
             dictionary containing function data
         """
+        metadata = {}
+        if isinstance(obj, str):
+            metadata["xdr"] = obj
+
         envelope, operation, source_acc = self._parse_envelope(obj)
-        sim_txn = self._simulate_transaction(envelope=envelope)
+        sim_txn = self._simulate_transaction(envelope=envelope, metadata={"source_account": source_acc, **metadata})
         nonce = None
         preimage_hash = None
         if sim_txn.results and (auth := sim_txn.results[0].auth):
