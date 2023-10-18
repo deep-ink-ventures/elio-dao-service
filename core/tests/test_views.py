@@ -174,31 +174,33 @@ class CoreViewSetTest(IntegrationTestCase):
     @patch("core.soroban.SorobanService.clear_db_and_cache")
     @patch("core.views.slack_logger")
     def test_update_config(self, slack_logger_mock, clear_db_and_cache_mock):
+        cache.clear()
+
         expected_res = {
-            "core_contract_address": "c",
-            "votes_contract_address": "v",
-            "assets_wasm_hash": "a",
-            "blockchain_url": "b",
-            "network_passphrase": "n",
+            "core_contract_address": "CDLUQRW6EXSX4SPXC4WTC3SD5KZE2BHDKPMMKJR4FOPGED4NPKKZ4C4Q",
+            "votes_contract_address": "2",
+            "assets_wasm_hash": "some_assets_wasm_hash",
+            "multiclique_wasm_hash": "1",
+            "policy_wasm_hash": "some_policy_wasm_hash",
+            "blockchain_url": "some_blockchain_url",
+            "network_passphrase": "some_network_passphrase",
         }
         payload = {
-            **expected_res,
-            "network_passphrase2": "n",
+            "multiclique_wasm_hash": "1",
+            "votes_contract_address": "2",
+            "not": "interesting",
         }
 
         with self.assertNumQueries(0), override_settings(SLACK_ELIO_URL="some url"):
             res = self.client.patch(
                 reverse("core-update-config"),
-                data={
-                    **payload,
-                    "not": "interesting",
-                },
+                data=payload,
                 content_type="application/json",
                 HTTP_CONFIG_SECRET="much-secure",
             )
 
         self.assertEqual(res.status_code, HTTP_200_OK)
-        self.assertDictEqual(res.data, expected_res)
+        self.assertDictEqual(res.json(), expected_res)
         clear_db_and_cache_mock.assert_called_once_with(new_config=expected_res)
         slack_logger_mock.info.assert_called_once_with(
             "New deployment! :happy_sheep:", extra={"channel": "some url", "disable_formatting": True}

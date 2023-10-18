@@ -126,11 +126,12 @@ def update_config(request, *args, **kwargs):
 
     serializer = serializers.UpdateConfigSerializer(data=request.data)
     serializer.is_valid(raise_exception=True)
-    soroban_service.clear_db_and_cache(new_config=serializer.data)
+    new_config = {**soroban_service.set_config(), **serializer.data}
+    soroban_service.clear_db_and_cache(new_config=new_config)
     slack_logger.info(
         "New deployment! :happy_sheep:", extra={"channel": settings.SLACK_ELIO_URL, "disable_formatting": True}
     )
-    return Response(data=serializer.data, status=HTTP_200_OK)
+    return Response(data=new_config, status=HTTP_200_OK)
 
 
 @method_decorator(swagger_auto_schema(operation_description="Retrieves an Account."), "retrieve")
