@@ -1,4 +1,5 @@
 import base64
+import json
 from unittest.mock import Mock, call, patch
 
 from ddt import data, ddt
@@ -6,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import IntegrityError, connection
 from django.test import override_settings
-from stellar_sdk import Keypair, StrKey
+from stellar_sdk import Keypair
 from stellar_sdk.client.response import Response
 from stellar_sdk.exceptions import SorobanRpcErrorResponse
 from stellar_sdk.soroban_rpc import EventFilter
@@ -61,17 +62,6 @@ class SorobanTest(IntegrationTestCase):
         (SCVal(SCValType.SCV_VOID), None),
         (SCVal(SCValType.SCV_SYMBOL, sym=SCSymbol(sc_symbol="AbC".encode())), "AbC"),
         (SCVal(SCValType.SCV_BYTES, bytes=SCBytes(sc_bytes="AbC\n".encode())), "AbC"),
-        (
-            SCVal(
-                SCValType.SCV_BYTES,
-                bytes=SCBytes(
-                    sc_bytes=StrKey.decode_ed25519_public_key(
-                        data="GBK3WFZRUY5KZTXCYN4WZ5I6AZLMIF5YAWUIKWP6W254NZLTR5LLJGE2"
-                    )
-                ),
-            ),
-            "GBK3WFZRUY5KZTXCYN4WZ5I6AZLMIF5YAWUIKWP6W254NZLTR5LLJGE2",
-        ),
         (
             SCVal(
                 SCValType.SCV_ADDRESS,
@@ -293,11 +283,13 @@ class SorobanTest(IntegrationTestCase):
             "result": "asd",
         }
         request_body = Mock()
+        request_body.model_dump_json.return_value = json.dumps({"some": "data"})
         server = RobustSorobanServer(server_url="some url", client=client_mock)
 
         res = server._post(request_body=request_body, response_body_type=str)
 
         self.assertEqual(res, "asd")
+        client_mock.post.assert_called_once_with("some url", json_data={"some": "data"})
 
     def test_RobustSorobanServer__post_error(self):
         client_mock = Mock()
@@ -307,10 +299,13 @@ class SorobanTest(IntegrationTestCase):
             "error": {"code": -32600, "message": "start is after newest ledger"},
         }
         request_body = Mock()
+        request_body.model_dump_json.return_value = json.dumps({"some": "data"})
         server = RobustSorobanServer(server_url="some url", client=client_mock)
 
         with self.assertRaises(SorobanRpcErrorResponse):
             server._post(request_body=request_body, response_body_type=str)
+
+        client_mock.post.assert_called_once_with("some url", json_data={"some": "data"})
 
     def test_RobustSorobanServer__post_json_err(self):
         client_mock = Mock()
@@ -326,10 +321,13 @@ class SorobanTest(IntegrationTestCase):
             url="some url",
         )
         request_body = Mock()
+        request_body.model_dump_json.return_value = json.dumps({"some": "data"})
         server = RobustSorobanServer(server_url="some url", client=client_mock)
 
         with self.assertRaisesMessage(SorobanRpcErrorResponse, "404 Not Found"):
             server._post(request_body=request_body, response_body_type=str)
+
+        client_mock.post.assert_called_once_with("some url", json_data={"some": "data"})
 
     @patch("core.soroban.SorobanServer.close")
     def test___exit__(self, close_mock):

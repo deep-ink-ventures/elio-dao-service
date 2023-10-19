@@ -1,3 +1,4 @@
+from django.contrib.postgres.fields import ArrayField
 from django.db import models
 from django.db.models import Q, UniqueConstraint
 
@@ -7,8 +8,8 @@ from core.utils import ChoiceEnum
 
 class MultiCliquePolicy(TimestampableMixin):
     address = models.CharField(primary_key=True, max_length=256)
-    name = models.CharField(max_length=256)
-    active = models.BooleanField(default=False)
+    name = models.CharField(max_length=256, null=True)
+    context = ArrayField(models.CharField(max_length=128), default=list)
 
     class Meta:
         db_table = "multiclique_policy"
@@ -71,7 +72,6 @@ class MultiCliqueTransaction(TimestampableMixin):
     rejections = models.ManyToManyField(MultiCliqueSignature, related_name="transaction_rejections")
     status = models.CharField(max_length=16, choices=TransactionStatus.as_choices(), default=TransactionStatus.PENDING)
     executed_at = models.DateTimeField(null=True, blank=True)
-    # todo find unique id
 
     class Meta:
         db_table = "multiclique_transaction"
@@ -87,6 +87,3 @@ class MultiCliqueTransaction(TimestampableMixin):
                 condition=Q(executed_at=None),
             ),
         ]
-
-    def __str__(self):
-        return f"XDR: {self.xdr[:20]}..."

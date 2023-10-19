@@ -30,7 +30,7 @@ class MultiCliqueContractXDRSerializer(serializers.Serializer):
 class MultiCliquePolicySerializer(ModelSerializer):
     class Meta:
         model = models.MultiCliquePolicy
-        fields = ("address", "name", "active")
+        fields = ("address", "name")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -79,10 +79,7 @@ class MultiCliqueAccountSerializer(ModelSerializer):
                 "default_threshold": validated_data["default_threshold"],
                 "policy": models.MultiCliquePolicy.objects.update_or_create(
                     address=validated_data["policy"]["address"],
-                    defaults={
-                        "name": validated_data["policy"]["name"],
-                        "active": validated_data["policy"].get("active"),
-                    },
+                    defaults={"name": validated_data["policy"]["name"]},
                 )[0],
             },
         )

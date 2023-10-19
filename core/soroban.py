@@ -33,7 +33,7 @@ from stellar_sdk.soroban_rpc import (
     SendTransactionStatus,
     SimulateTransactionResponse,
 )
-from stellar_sdk.soroban_server import V
+from stellar_sdk.soroban_server import V  # noqa
 from stellar_sdk.utils import sha256
 from stellar_sdk.xdr import (
     Hash,
@@ -87,9 +87,9 @@ def unpack_sc(val: SCVal | SCVec | SCAddress | SCSymbol | Hash):
             return val.sym.sc_symbol.decode().strip()
         case SCValType.SCV_BYTES:
             try:
-                return val.bytes.sc_bytes.decode().strip()
+                return val.bytes.sc_bytes.decode().strip().replace("\x00", "")
             except UnicodeDecodeError:
-                return StrKey.encode_ed25519_public_key(val.bytes.sc_bytes)
+                return str(val.bytes.sc_bytes)
         case SCValType.SCV_ADDRESS:
             if val.address.type == SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
                 return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
@@ -320,17 +320,21 @@ class RobustSorobanServer(SorobanServer):
     """
 
     def _post(self, request_body: Request, response_body_type: Type[V]) -> V:
-        json_data = request_body.dict(by_alias=True)
+        json_data = request_body.model_dump_json(by_alias=True)
         data = self._client.post(
             self.server_url,
-            json_data=json_data,
+            json_data=json.loads(json_data),
         )
         try:
-            response = Response[response_body_type].parse_obj(data.json())
+            response = Response[response_body_type].model_validate(data.json())
         except JSONDecodeError:
             raise SorobanRpcErrorResponse(code=data.status_code, message=data.text)
+
         if response.error:
-            raise SorobanRpcErrorResponse(code=response.error.code, message=response.error.message)
+            raise SorobanRpcErrorResponse(
+                code=response.error.code, message=response.error.message, data=response.error.data
+            )
+        assert response.result is not None
         return response.result
 
 
@@ -515,6 +519,11 @@ class SorobanService(object):
         return unpack_sc(stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value)
 
     def prepare_transaction(self, envelope: TransactionEnvelope, keypair: Keypair = None, sim_txn=None):
+        if keypair:
+            acc = self.soroban.load_account(keypair.public_key)
+            envelope.transaction.source = acc.account
+            envelope.transaction.sequence = acc.sequence + 1
+
         try:
             envelope = self.soroban.prepare_transaction(
                 transaction_envelope=envelope, simulate_transaction_response=sim_txn
@@ -931,7 +940,7 @@ class SorobanService(object):
             if cache.get("restart_listener"):
                 logger.info("Restarting listener...")
                 self.soroban.close()
-                self.soroban = retry("reinitializing blockchain connection")(SorobanServer)(
+                self.soroban = retry("reinitializing blockchain connection")(RobustSorobanServer)(
                     server_url=self.set_config()["blockchain_url"]
                 )
                 cache.delete("restart_listener")

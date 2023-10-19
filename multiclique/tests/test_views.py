@@ -35,8 +35,8 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.sig2 = models.MultiCliqueSignature.objects.create(signatory=self.signer2, signature="sig2")
         self.sig3 = models.MultiCliqueSignature.objects.create(signatory=self.signer3, signature="sig3")
         self.sig4 = models.MultiCliqueSignature.objects.create(signatory=self.signer4, signature="sig4")
-        self.pol1 = models.MultiCliquePolicy.objects.create(address="POL1", name="ELIO_DAO", active=True)
-        self.pol2 = models.MultiCliquePolicy.objects.create(address="POL2", name="ELIO_DAO", active=False)
+        self.pol1 = models.MultiCliquePolicy.objects.create(address="POL1", name="ELIO_DAO")
+        self.pol2 = models.MultiCliquePolicy.objects.create(address="POL2", name="ELIO_DAO")
         self.mc1 = models.MultiCliqueAccount(address="addr1", name="acc1", policy=self.pol1, default_threshold=2)
         self.mc1.signatories.set([self.signer1, self.signer2, self.signer3, self.signer4])
         self.mc1.save()
@@ -175,7 +175,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr1",
             "name": "acc1",
-            "policy": {"active": True, "address": "POL1", "name": "ELIO_DAO"},
+            "policy": {"address": "POL1", "name": "ELIO_DAO"},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -197,7 +197,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 {
                     "address": "addr1",
                     "name": "acc1",
-                    "policy": {"active": True, "address": "POL1", "name": "ELIO_DAO"},
+                    "policy": {"address": "POL1", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -209,7 +209,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 {
                     "address": "addr2",
                     "name": "acc2",
-                    "policy": {"active": False, "address": "POL2", "name": "ELIO_DAO"},
+                    "policy": {"address": "POL2", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk2", "name": "signer2"},
                         {"address": "pk3", "name": "signer3"},
@@ -252,7 +252,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
-            "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
+            "policy": {"address": "POL3", "name": "ELIO_DAO"},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -268,7 +268,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 data={
                     "address": "addr3",
                     "name": "acc1",
-                    "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
+                    "policy": {"address": "POL3", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2"},
@@ -324,7 +324,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
-            "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
+            "policy": {"address": "POL3", "name": "ELIO_DAO"},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -350,7 +350,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 data={
                     "address": "addr3",
                     "name": "acc1",
-                    "policy": {"address": "POL3", "name": "ELIO_DAO", "active": True},
+                    "policy": {"address": "POL3", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -386,7 +386,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr2",
             "name": "acc1",
-            "policy": {"address": "POL2", "name": "ELIO_DAO", "active": True},
+            "policy": {"address": "POL2", "name": "ELIO_DAO"},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -402,7 +402,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 data={
                     "address": "addr2",
                     "name": "acc1",
-                    "policy": {"address": "POL2", "name": "ELIO_DAO", "active": True},
+                    "policy": {"address": "POL2", "name": "ELIO_DAO"},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -419,14 +419,14 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         set_trusted_contract_ids_mock.assert_called_once_with()
 
     def test_multiclique_account_create_invalid(self):
-        expected_res = {"name": ["This field is required."], "policy": {"name": ["This field is required."]}}
+        expected_res = {"name": ["This field is required."]}
 
         with self.assertNumQueries(0):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
                     "address": "addr2",
-                    "policy": {"address": "POL3", "active": True},
+                    "policy": {"address": "POL3"},
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
