@@ -102,7 +102,7 @@ class MultiCliqueEventHandler:
                 ignore_conflicts=True,
             )
             self._update_transactions(
-                "add_signer", [{addr: [sig]} for addr, sigs in acc_to_sigs.items() for sig in sigs]
+                "add_signer", [{addr: [sig.address]} for addr, sigs in acc_to_sigs.items() for sig in sigs]
             )
 
     def _rm_signer(self, event_data: dict[list[dict]], **_):
@@ -133,7 +133,7 @@ class MultiCliqueEventHandler:
                 )
             ).delete()
             self._update_transactions(
-                "remove_signer", [{addr: [sig]} for addr, sigs in acc_to_sigs.items() for sig in sigs]
+                "remove_signer", [{addr: [sig.address]} for addr, sigs in acc_to_sigs.items() for sig in sigs]
             )
 
     def _set_default_threshold(self, event_data: dict[list[dict]], **_):

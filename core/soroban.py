@@ -89,7 +89,9 @@ def unpack_sc(val: SCVal | SCVec | SCAddress | SCSymbol | Hash):
             try:
                 return val.bytes.sc_bytes.decode().strip().replace("\x00", "")
             except UnicodeDecodeError:
-                return str(val.bytes.sc_bytes)
+                return StrKey.encode_ed25519_public_key(val.bytes.sc_bytes)
+                # todo replace this once protocols are ready
+                # str(return val.bytes.sc_bytes)
         case SCValType.SCV_ADDRESS:
             if val.address.type == SCAddressType.SC_ADDRESS_TYPE_ACCOUNT:
                 return StrKey.encode_ed25519_public_key(val.address.account_id.account_id.ed25519.uint256)
