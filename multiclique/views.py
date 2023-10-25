@@ -96,8 +96,12 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
     lookup_field = "address"
 
     def get_queryset(self):
-        return self.queryset.select_related("policy").prefetch_related(
-            Prefetch("signatories", queryset=models.MultiCliqueSignatory.objects.order_by("address"))
+        if self.action == "challenge":
+            return self.queryset
+
+        return self.queryset.prefetch_related(
+            "policy__contracts",
+            Prefetch("signatories", queryset=models.MultiCliqueSignatory.objects.order_by("address")),
         )
 
     @swagger_auto_schema(
@@ -178,7 +182,7 @@ class MultiCliqueAccountViewSet(ReadOnlyModelViewSet, CreateModelMixin, Searchab
 class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, SearchableMixin):
     queryset = models.MultiCliqueTransaction.objects.all()
     serializer_class = serializers.MultiCliqueTransactionSerializer
-    filter_fields = ["xdr"]
+    filter_fields = ["xdr", "status"]
     ordering_fields = ["call_func", "status", "executed_at"]
     permission_classes = [IsAuthenticated]
 
@@ -207,14 +211,14 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Sear
         data = serializer.data
 
         try:
-            xdr_data = soroban_service.analyze_transaction(obj=(xdr := data["xdr"]))
-        except SorobanException as exc:
-            return Response(data={**exc.ctx, "error": str(exc)}, status=HTTP_400_BAD_REQUEST)
-
-        try:
             acc = models.MultiCliqueAccount.objects.get(address=request.user.id)
         except models.MultiCliqueAccount.DoesNotExist:
             return Response(data={"error": "MultiCliqueAccount does not exist."}, status=HTTP_400_BAD_REQUEST)
+
+        try:
+            xdr_data = soroban_service.analyze_transaction(obj=(xdr := data["xdr"]))
+        except SorobanException as exc:
+            return Response(data={**exc.ctx, "error": str(exc)}, status=HTTP_400_BAD_REQUEST)
 
         serializer = self.get_serializer(
             data={

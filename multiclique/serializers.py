@@ -1,20 +1,31 @@
 from django.conf import settings
-from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
-from rest_framework.fields import CharField, IntegerField
+from rest_framework.fields import CharField, ChoiceField, IntegerField
 from rest_framework.serializers import ModelSerializer, Serializer
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from multiclique import models
 
 
-class CreateMultiCliqueContractSerializer(serializers.Serializer):
-    source_account_address = serializers.CharField(max_length=56)
+class CreateMultiCliqueContractSerializer(Serializer):
+    source_account_address = CharField(max_length=56)
 
 
-class CreatePolicyContractSerializer(serializers.Serializer):
-    source_account_address = serializers.CharField(max_length=56)
-    policy_preset = serializers.CharField(help_text='currently only supports "ELIO_DAO"')
+class MultiCliqueContractSerializer(ModelSerializer):
+    limit = IntegerField(required=False)
+    already_spent = IntegerField(required=False)
+    type = ChoiceField(
+        choices=models.MultiCliqueContractType.as_choices(), default=models.MultiCliqueContractType.UNKNOWN
+    )
+
+    class Meta:
+        model = models.MultiCliqueContract
+        fields = ("address", "limit", "already_spent", "type")
+
+
+class CreatePolicyContractSerializer(Serializer):
+    source_account_address = CharField(max_length=56)
+    policy_preset = CharField(help_text='currently only supports "ELIO_DAO"')
 
     @staticmethod
     def validate_policy_preset(value):
@@ -23,14 +34,16 @@ class CreatePolicyContractSerializer(serializers.Serializer):
         return value
 
 
-class MultiCliqueContractXDRSerializer(serializers.Serializer):
-    xdr = serializers.CharField()
+class MultiCliqueContractXDRSerializer(Serializer):
+    xdr = CharField()
 
 
 class MultiCliquePolicySerializer(ModelSerializer):
+    contracts = MultiCliqueContractSerializer(many=True, read_only=True)
+
     class Meta:
         model = models.MultiCliquePolicy
-        fields = ("address", "name")
+        fields = ("address", "name", "contracts")
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -56,8 +69,8 @@ class MultiCliqueSignatorySerializer(ModelSerializer):
 
 
 class MultiCliqueAccountSerializer(ModelSerializer):
-    policy = MultiCliquePolicySerializer()
-    signatories = MultiCliqueSignatorySerializer(many=True)
+    policy = MultiCliquePolicySerializer(required=False)
+    signatories = MultiCliqueSignatorySerializer(many=True, default=[])
 
     class Meta:
         model = models.MultiCliqueAccount

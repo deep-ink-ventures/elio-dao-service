@@ -1,8 +1,9 @@
 from collections import defaultdict
 from functools import reduce
 from itertools import chain
-from typing import Optional, Sequence
+from typing import Sequence
 
+from django.core.cache import cache
 from django.db.models import Q
 from django.utils.timezone import now
 
@@ -50,6 +51,28 @@ class MultiCliqueEventHandler:
         ).update(status=models.TransactionStatus.EXECUTED, executed_at=now())
 
     @staticmethod
+    def _identify_contract_address(contract_addr) -> models.MultiCliqueContractType:
+        """
+        Args:
+            contract_addr: contract address to identify
+
+        Returns:
+            MultiCliqueContractType
+
+        checks if the contract address is already known to the service and returns a corresponding
+        MultiCliqueContractType
+        """
+        from core.soroban import soroban_service
+
+        config = soroban_service.set_config()
+        asset_addrs = cache.get("asset_addresses") or soroban_service.set_asset_addresses()
+        return {
+            **{asset_addr: models.MultiCliqueContractType.ELIO_ASSET for asset_addr in asset_addrs},
+            config["core_contract_address"]: models.MultiCliqueContractType.ELIO_CORE,
+            config["votes_contract_address"]: models.MultiCliqueContractType.ELIO_VOTES,
+        }.get(contract_addr, models.MultiCliqueContractType.UNKNOWN)
+
+    @staticmethod
     def _init_multiclique_contract(event_data: dict[list[dict]], **_):
         """
         Args:
@@ -66,8 +89,12 @@ class MultiCliqueEventHandler:
             sigs[contract_id] = [models.MultiCliqueSignatory(address=addr) for addr in events[0]["signers"]]
 
         if accs:
+            # update accounts' default_threshold, no need to bulk create since the event can only be caught
+            # if the account already exists
             models.MultiCliqueAccount.objects.bulk_update(accs.values(), ["default_threshold"])
+            # defensively create missing signatories
             models.MultiCliqueSignatory.objects.bulk_create(chain(*sigs.values()), ignore_conflicts=True)
+            # populate acc:signatory m2m
             m2m = models.MultiCliqueAccount.signatories.through
             m2m.objects.bulk_create(
                 [
@@ -77,6 +104,7 @@ class MultiCliqueEventHandler:
                 ],
                 ignore_conflicts=True,
             )
+            # no transaction to update since don't create one for init
 
     def _add_signer(self, event_data: dict[list[dict]], **_):
         """
@@ -91,7 +119,9 @@ class MultiCliqueEventHandler:
                 acc_to_sigs[contract_id].append(models.MultiCliqueSignatory(address=event["signer"]))
 
         if acc_to_sigs:
+            # defensively create missing signatories
             models.MultiCliqueSignatory.objects.bulk_create(chain(*acc_to_sigs.values()), ignore_conflicts=True)
+            # populate acc:signatory m2m
             m2m = models.MultiCliqueAccount.signatories.through
             m2m.objects.bulk_create(
                 [
@@ -101,6 +131,7 @@ class MultiCliqueEventHandler:
                 ],
                 ignore_conflicts=True,
             )
+            # update transactions
             self._update_transactions(
                 "add_signer", [{addr: [sig.address]} for addr, sigs in acc_to_sigs.items() for sig in sigs]
             )
@@ -118,6 +149,7 @@ class MultiCliqueEventHandler:
                 acc_to_sigs[contract_id].append(models.MultiCliqueSignatory(address=event["signer"]))
 
         if acc_to_sigs:
+            # update accounts
             models.MultiCliqueAccount.signatories.through.objects.filter(
                 # WHERE (
                 #     (multicliqueaccount_id = 1 AND multicliquesignatory_id IN (3, 4))
@@ -132,6 +164,7 @@ class MultiCliqueEventHandler:
                     ],
                 )
             ).delete()
+            # update transactions
             self._update_transactions(
                 "remove_signer", [{addr: [sig.address]} for addr, sigs in acc_to_sigs.items() for sig in sigs]
             )
@@ -150,7 +183,10 @@ class MultiCliqueEventHandler:
             addr_to_acc[contract_id].default_threshold = events[0]["threshold"]
 
         if addr_to_acc:
+            # update accounts' default_threshold, no need to bulk create since the event can only be caught
+            # if the account already exists
             models.MultiCliqueAccount.objects.bulk_update(addr_to_acc.values(), ["default_threshold"])
+            # update transactions
             self._update_transactions(
                 "set_default_threshold", [{addr: [acc.default_threshold]} for addr, acc in addr_to_acc.items()]
             )
@@ -165,36 +201,47 @@ class MultiCliqueEventHandler:
         from core.soroban import soroban_service
 
         acc_addr_to_pol_addr = {}
-        pol_addr_to_ctx: defaultdict = defaultdict(list)
+        pol_addr_to_contracts: defaultdict = defaultdict(list)
         for contract_id, events in event_data.items():
             for event in events:
+                policy_addr = event["policy"]
                 acc_addr_to_pol_addr[contract_id] = event["policy"]
-                pol_addr_to_ctx[event["policy"]].extend(event["context"])
+                pol_addr_to_contracts[policy_addr] = [
+                    models.MultiCliqueContract(address=ctr_addr, type=self._identify_contract_address(ctr_addr))
+                    for ctr_addr in event["context"]
+                ]
 
-        if pol_addr_to_ctx:
-            # update existing policies
-            for policy in (
-                policies := models.MultiCliquePolicy.objects.filter(address__in=set(acc_addr_to_pol_addr.values()))
-            ):
-                policy.context.extend(pol_addr_to_ctx.pop(policy.address))
-
-            models.MultiCliquePolicy.objects.bulk_update(policies, fields=["context"])
-            # create remaining policies
-            if pol_addr_to_ctx:
-                models.MultiCliquePolicy.objects.bulk_create(
-                    [models.MultiCliquePolicy(address=addr, context=ctx) for addr, ctx in pol_addr_to_ctx.items()],
-                    ignore_conflicts=True,
-                )
-                soroban_service.set_trusted_contract_ids()
-
+        if pol_addr_to_contracts:
+            # defensively create missing policies
+            models.MultiCliquePolicy.objects.bulk_create(
+                [models.MultiCliquePolicy(address=addr) for addr in pol_addr_to_contracts.keys()],
+                ignore_conflicts=True,
+            )
+            # add update contract ids so the listener can fetches events for the newly added policies
+            soroban_service.set_trusted_contract_ids()
+            # create policy contracts
+            models.MultiCliqueContract.objects.bulk_create(
+                chain(*pol_addr_to_contracts.values()), ignore_conflicts=True
+            )
+            # populate policy:contact m2m
+            m2m_mdl = models.MultiCliqueContract.policies.through
+            m2m_mdl.objects.bulk_create(
+                [
+                    m2m_mdl(multicliquecontract_id=contract.address, multicliquepolicy_id=pol_addr)
+                    for pol_addr, contracts in pol_addr_to_contracts.items()
+                    for contract in contracts
+                ],
+                ignore_conflicts=True,
+            )
             # update accounts
             for acc in (accs := models.MultiCliqueAccount.objects.filter(address__in=acc_addr_to_pol_addr.keys())):
                 acc.policy_id = acc_addr_to_pol_addr[acc.address]
             models.MultiCliqueAccount.objects.bulk_update(accs, fields=["policy_id"])
+            # update transactions
             self._update_transactions(
                 "attach_policy",
                 [
-                    {acc_addr: [pol_addr, *pol_addr_to_ctx[pol_addr]]}
+                    {acc_addr: [pol_addr, [ctr.address for ctr in pol_addr_to_contracts[pol_addr]]]}
                     for acc_addr, pol_addr in acc_addr_to_pol_addr.items()
                 ],
             )
@@ -212,26 +259,27 @@ class MultiCliqueEventHandler:
                 acc_addr_to_ctx[contract_id].extend(event["context"])
 
         if acc_addr_to_ctx:
-            # update existing policies
-            accs_to_update = []
-            policies_to_update = []
-            for acc in models.MultiCliqueAccount.objects.filter(address__in=acc_addr_to_ctx.keys()).select_related(
-                "policy"
-            ):
-                policy: Optional[models.MultiCliquePolicy] = acc.policy
-                # set policy's ctx to existing addresses which have not been rmed
-                policy.context = [addr for addr in policy.context if addr not in acc_addr_to_ctx[acc.address]]
-                policies_to_update.append(policy)
-                # if there are no addresses remaining we unlink the policy from the acc
-                if not policy.context:
-                    acc.policy = None
-                    accs_to_update.append(acc)
-
-            models.MultiCliquePolicy.objects.bulk_update(policies_to_update, fields=["context"])
-            # update accounts
-            if accs_to_update:
-                models.MultiCliqueAccount.objects.bulk_update(accs_to_update, fields=["policy"])
-
+            # delete the detached contracts
+            models.MultiCliqueContract.policies.through.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [
+                        Q(multicliquepolicy__accounts__address=acc_addr, multicliquecontract_id__in=ctx)
+                        for acc_addr, ctx in acc_addr_to_ctx.items()
+                    ],
+                )
+            ).delete()
+            # delete all policies which have no attached contracts
+            models.MultiCliquePolicy.objects.filter(
+                ~Q(
+                    address__in=list(
+                        models.MultiCliqueContract.policies.through.objects.all().values_list(
+                            "multicliquepolicy_id", flat=True
+                        )
+                    )
+                )
+            ).delete()
+            # update transactions
             self._update_transactions("detach_policy", [{acc_addr: ctx} for acc_addr, ctx in acc_addr_to_ctx.items()])
 
 

@@ -229,7 +229,9 @@ def retry(description: str):
                                     )
                                     log_and_sleep(msg)
                                 case _:
-                                    log_and_sleep(f"SorobanRpcErrorResponse ({exc.message})", log_exception=True)
+                                    log_and_sleep(
+                                        f"SorobanRpcErrorResponse ({exc.code}: {exc.message})", log_exception=True
+                                    )
                 except Exception:  # noqa E722
                     log_and_sleep("Unexpected error", log_exception=True)
 
@@ -838,6 +840,15 @@ class SorobanService(object):
         ]
         cache.set(key="trusted_contract_ids", value=trusted_contract_ids)
         return trusted_contract_ids
+
+    @staticmethod
+    def set_asset_addresses() -> [str]:
+        """
+        caches asset addresses at "asset_addresses"
+        """
+        asset_ids = [*core_models.Asset.objects.values_list("address", flat=True)]
+        cache.set(key="asset_addresses", value=asset_ids)
+        return asset_ids
 
     def find_start_ledger(self, lower_bound: int = 0):
         """

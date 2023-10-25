@@ -1,15 +1,25 @@
-from django.contrib.postgres.fields import ArrayField
-from django.db import models
-from django.db.models import Q, UniqueConstraint
+from django.db.models import (
+    CASCADE,
+    DO_NOTHING,
+    SET_NULL,
+    BigIntegerField,
+    CharField,
+    DateTimeField,
+    ForeignKey,
+    JSONField,
+    ManyToManyField,
+    PositiveIntegerField,
+    Q,
+    UniqueConstraint,
+)
 
 from core.models import TimestampableMixin
-from core.utils import ChoiceEnum
+from core.utils import BiggerIntField, ChoiceEnum
 
 
 class MultiCliquePolicy(TimestampableMixin):
-    address = models.CharField(primary_key=True, max_length=256)
-    name = models.CharField(max_length=256, null=True)
-    context = ArrayField(models.CharField(max_length=128), default=list)
+    address = CharField(primary_key=True, max_length=128)
+    name = CharField(max_length=256, null=True)
 
     class Meta:
         db_table = "multiclique_policy"
@@ -17,9 +27,31 @@ class MultiCliquePolicy(TimestampableMixin):
         verbose_name_plural = "MultiClique Policies"
 
 
+class MultiCliqueContractType(ChoiceEnum):
+    ELIO_CORE = "elio core"
+    ELIO_VOTES = "elio votes"
+    ELIO_ASSET = "elio asset"
+    UNKNOWN = "unknown"
+
+
+class MultiCliqueContract(TimestampableMixin):
+    policies = ManyToManyField(MultiCliquePolicy, related_name="contracts")
+    address = CharField(primary_key=True, max_length=128)
+    limit = BiggerIntField(null=True)
+    already_spent = BiggerIntField(null=True)
+    type = CharField(
+        max_length=32, choices=MultiCliqueContractType.as_choices(), default=MultiCliqueContractType.UNKNOWN
+    )
+
+    class Meta:
+        db_table = "multiclique_contract"
+        verbose_name = "MultiClique Contract"
+        verbose_name_plural = "MultiClique Contracts"
+
+
 class MultiCliqueSignatory(TimestampableMixin):
-    address = models.CharField(primary_key=True, max_length=128)
-    name = models.CharField(max_length=128, null=True)
+    address = CharField(primary_key=True, max_length=128)
+    name = CharField(max_length=128, null=True)
 
     class Meta:
         db_table = "multiclique_signatory"
@@ -28,8 +60,8 @@ class MultiCliqueSignatory(TimestampableMixin):
 
 
 class MultiCliqueSignature(TimestampableMixin):
-    signatory = models.ForeignKey(MultiCliqueSignatory, on_delete=models.DO_NOTHING)
-    signature = models.CharField(max_length=256, primary_key=True)
+    signatory = ForeignKey(MultiCliqueSignatory, related_name="signatures", on_delete=DO_NOTHING)
+    signature = CharField(max_length=256, primary_key=True)
 
     class Meta:
         db_table = "multiclique_signature"
@@ -38,19 +70,16 @@ class MultiCliqueSignature(TimestampableMixin):
 
 
 class MultiCliqueAccount(TimestampableMixin):
-    address = models.CharField(primary_key=True, max_length=128)
-    name = models.CharField(max_length=128)
-    signatories = models.ManyToManyField(MultiCliqueSignatory, related_name="accounts")
-    default_threshold = models.PositiveIntegerField(null=True)
-    policy = models.ForeignKey(MultiCliquePolicy, on_delete=models.SET_NULL, null=True)
+    address = CharField(primary_key=True, max_length=128)
+    name = CharField(max_length=128)
+    signatories = ManyToManyField(MultiCliqueSignatory, related_name="accounts")
+    default_threshold = PositiveIntegerField(null=True)
+    policy = ForeignKey(MultiCliquePolicy, related_name="accounts", on_delete=SET_NULL, null=True)
 
     class Meta:
         db_table = "multiclique_account"
         verbose_name = "MultiClique Account"
         verbose_name_plural = " MultiClique Accounts"
-
-    def __str__(self):
-        return f"{self.address}"
 
 
 class TransactionStatus(ChoiceEnum):
@@ -61,17 +90,17 @@ class TransactionStatus(ChoiceEnum):
 
 
 class MultiCliqueTransaction(TimestampableMixin):
-    xdr = models.CharField(max_length=4096, null=True)
-    nonce = models.BigIntegerField(null=True)
-    ledger = models.BigIntegerField(null=True)
-    preimage_hash = models.CharField(max_length=1024, null=True)
-    call_func = models.CharField(max_length=256, null=True)
-    call_args = models.JSONField(null=True)
-    multiclique_account = models.ForeignKey(MultiCliqueAccount, related_name="transactions", on_delete=models.CASCADE)
-    approvals = models.ManyToManyField(MultiCliqueSignature, related_name="transaction_approvals")
-    rejections = models.ManyToManyField(MultiCliqueSignature, related_name="transaction_rejections")
-    status = models.CharField(max_length=16, choices=TransactionStatus.as_choices(), default=TransactionStatus.PENDING)
-    executed_at = models.DateTimeField(null=True, blank=True)
+    xdr = CharField(max_length=4096, null=True)
+    nonce = BigIntegerField(null=True)
+    ledger = BigIntegerField(null=True)
+    preimage_hash = CharField(max_length=1024, null=True)
+    call_func = CharField(max_length=256, null=True)
+    call_args = JSONField(null=True)
+    multiclique_account = ForeignKey(MultiCliqueAccount, related_name="transactions", on_delete=CASCADE)
+    approvals = ManyToManyField(MultiCliqueSignature, related_name="transaction_approvals")
+    rejections = ManyToManyField(MultiCliqueSignature, related_name="transaction_rejections")
+    status = CharField(max_length=16, choices=TransactionStatus.as_choices(), default=TransactionStatus.PENDING)
+    executed_at = DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "multiclique_transaction"

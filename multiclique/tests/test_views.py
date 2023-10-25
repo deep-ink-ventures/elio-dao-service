@@ -37,6 +37,10 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.sig4 = models.MultiCliqueSignature.objects.create(signatory=self.signer4, signature="sig4")
         self.pol1 = models.MultiCliquePolicy.objects.create(address="POL1", name="ELIO_DAO")
         self.pol2 = models.MultiCliquePolicy.objects.create(address="POL2", name="ELIO_DAO")
+        self.ctr1 = models.MultiCliqueContract.objects.create(
+            address="CTR1", type=models.MultiCliqueContractType.ELIO_CORE, limit=10, already_spent=5
+        )
+        self.ctr1.policies.add(self.pol1)
         self.mc1 = models.MultiCliqueAccount(address="addr1", name="acc1", policy=self.pol1, default_threshold=2)
         self.mc1.signatories.set([self.signer1, self.signer2, self.signer3, self.signer4])
         self.mc1.save()
@@ -175,7 +179,18 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr1",
             "name": "acc1",
-            "policy": {"address": "POL1", "name": "ELIO_DAO"},
+            "policy": {
+                "address": "POL1",
+                "name": "ELIO_DAO",
+                "contracts": [
+                    {
+                        "address": "CTR1",
+                        "already_spent": 5,
+                        "limit": 10,
+                        "type": models.MultiCliqueContractType.ELIO_CORE,
+                    }
+                ],
+            },
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -185,7 +200,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "default_threshold": 2,
         }
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(4):
             res = self.client.get(reverse("multiclique-accounts-detail", kwargs={"address": "addr1"}))
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -197,7 +212,18 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 {
                     "address": "addr1",
                     "name": "acc1",
-                    "policy": {"address": "POL1", "name": "ELIO_DAO"},
+                    "policy": {
+                        "address": "POL1",
+                        "name": "ELIO_DAO",
+                        "contracts": [
+                            {
+                                "address": "CTR1",
+                                "already_spent": 5,
+                                "limit": 10,
+                                "type": models.MultiCliqueContractType.ELIO_CORE,
+                            }
+                        ],
+                    },
                     "signatories": [
                         {"address": "pk1", "name": "signer1"},
                         {"address": "pk2", "name": "signer2"},
@@ -209,7 +235,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 {
                     "address": "addr2",
                     "name": "acc2",
-                    "policy": {"address": "POL2", "name": "ELIO_DAO"},
+                    "policy": {"address": "POL2", "name": "ELIO_DAO", "contracts": []},
                     "signatories": [
                         {"address": "pk2", "name": "signer2"},
                         {"address": "pk3", "name": "signer3"},
@@ -218,7 +244,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                 },
             ]
         )
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             res = self.client.get(reverse("multiclique-accounts-list"), {"ordering": "address"})
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -241,7 +267,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         mc4.signatories.set([self.signer4, self.signer1])
         mc4.save()
 
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(5):
             res = self.client.get(reverse("multiclique-accounts-list"), {"signatories": _filter, "ordering": "address"})
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -252,7 +278,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
-            "policy": {"address": "POL3", "name": "ELIO_DAO"},
+            "policy": {"address": "POL3", "name": "ELIO_DAO", "contracts": []},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -262,7 +288,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "default_threshold": 3,
         }
 
-        with self.assertNumQueries(17):
+        with self.assertNumQueries(18):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
@@ -324,7 +350,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr3",
             "name": "acc1",
-            "policy": {"address": "POL3", "name": "ELIO_DAO"},
+            "policy": {"address": "POL3", "name": "ELIO_DAO", "contracts": []},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -344,7 +370,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         mc3.signatories.set([self.signer1, self.signer2, self.signer3, self.signer4])
         mc3.save()
 
-        with self.assertNumQueries(14):
+        with self.assertNumQueries(15):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
@@ -386,7 +412,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         expected_res = {
             "address": "addr2",
             "name": "acc1",
-            "policy": {"address": "POL2", "name": "ELIO_DAO"},
+            "policy": {"address": "POL2", "name": "ELIO_DAO", "contracts": []},
             "signatories": [
                 {"address": "pk1", "name": "signer1"},
                 {"address": "pk2", "name": "signer2"},
@@ -396,7 +422,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "default_threshold": 3,
         }
 
-        with self.assertNumQueries(13):
+        with self.assertNumQueries(14):
             res = self.client.post(
                 reverse("multiclique-accounts-list"),
                 data={
@@ -445,7 +471,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         cache.clear()
         expected_res = {"challenge": ANY}
 
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(1):
             res = self.client.get(reverse("multiclique-accounts-challenge", kwargs={"address": self.mc1.address}))
 
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
@@ -694,6 +720,58 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertEqual(res.status_code, HTTP_200_OK, res.json())
         self.assertDictEqual(res.json(), expected_res)
 
+    def test_multiclique_transaction_list_status_filter(self):
+        expected_res = self.wrap_in_pagination_res(
+            [
+                {
+                    "id": self.txn1.id,
+                    "xdr": self.txn1.xdr,
+                    "preimage_hash": self.txn1.preimage_hash,
+                    "call_func": self.txn1.call_func,
+                    "call_args": self.txn1.call_args,
+                    "approvals": [
+                        {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                    ],
+                    "rejections": [
+                        {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+                        {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                    ],
+                    "status": self.txn1.status,
+                    "executed_at": self.fmt_dt(self.txn1.executed_at),
+                    "created_at": self.fmt_dt(self.txn1.created_at),
+                    "updated_at": self.fmt_dt(self.txn1.updated_at),
+                    "multiclique_address": self.mc1.address,
+                    "default_threshold": self.mc1.default_threshold,
+                    "signatories": [
+                        {"address": "pk1", "name": "signer1"},
+                        {"address": "pk2", "name": "signer2"},
+                        {"address": "pk3", "name": "signer3"},
+                        {"address": "pk4", "name": "signer4"},
+                    ],
+                },
+            ]
+        )
+
+        with self.assertNumQueries(8):
+            res = self.client.get(
+                reverse("multiclique-transactions-list"),
+                {"status": models.TransactionStatus.PENDING},
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), expected_res)
+
+        with self.assertNumQueries(1):
+            res = self.client.get(
+                reverse("multiclique-transactions-list"),
+                {"status": models.TransactionStatus.EXECUTABLE},
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.assertDictEqual(res.json(), {"count": 0, "next": None, "previous": None, "results": []})
+
     @patch("core.soroban.soroban_service.analyze_transaction")
     def test_multiclique_transaction_create(self, analyze_transaction_mock):
         analyze_transaction_mock.return_value = {
@@ -767,7 +845,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         analyze_transaction_mock.side_effect = InvalidXDRException(ctx={"some": "ctx"})
         expected_res = {"error": "The XDR is invalid.", "some": "ctx"}
 
-        with self.assertNumQueries(0):
+        with self.assertNumQueries(1):
             res = self.client.post(
                 reverse("multiclique-transactions-list"),
                 data={

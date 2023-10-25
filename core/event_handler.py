@@ -145,6 +145,7 @@ class SorobanEventHandler:
                 asset_holding_obj.asset_id = asset.address
             models.AssetHolding.objects.bulk_create(asset_holdings)
             soroban_service.set_trusted_contract_ids()
+            soroban_service.set_asset_addresses()
 
     @staticmethod
     def _mint_tokens(event_data: dict[list[dict]], **_):

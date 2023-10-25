@@ -244,7 +244,7 @@ class SorobanTest(IntegrationTestCase):
         with override_settings(RETRY_DELAYS=(1, 2, 3)), self.assertRaisesMessage(Exception, "break retry"):
             retry("some description")(func)()
 
-        expected_err_msg = "SorobanRpcErrorResponse (some err) while some description. Retrying in %ss ..."
+        expected_err_msg = "SorobanRpcErrorResponse (0: some err) while some description. Retrying in %ss ..."
         logger_mock.exception.assert_has_calls([call(expected_err_msg % i) for i in range(1, 3)])
 
     @patch("core.soroban.slack_logger")
