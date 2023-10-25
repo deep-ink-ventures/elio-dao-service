@@ -253,10 +253,11 @@ class MultiCliqueTransactionViewSet(ReadOnlyModelViewSet, CreateModelMixin, Sear
     def partial_update(self, request, *args, **kwargs):
         from core.soroban import SorobanException, update_transaction
 
-        serializer = serializers.UpdateMultiCliqueTransactionSerializer(data=request.data)
+        txn = self.get_object()
+        serializer = serializers.UpdateMultiCliqueTransactionSerializer(data=request.data, context={"txn": txn})
         serializer.is_valid(raise_exception=True)
 
-        serializer = self.get_serializer(instance=self.get_object(), data=serializer.data, partial=True)
+        serializer = self.get_serializer(instance=txn, data=serializer.data, partial=True)
         if not serializer.is_valid():
             slack_logger.error(serializer.errors)
             return Response(data={"error": "Error during Transaction update"}, status=HTTP_400_BAD_REQUEST)

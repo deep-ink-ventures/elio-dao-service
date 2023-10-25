@@ -558,6 +558,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "preimage_hash": self.txn1.preimage_hash,
             "call_func": self.txn1.call_func,
             "call_args": self.txn1.call_args,
+            "submitter": None,
             "approvals": [
                 {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
             ],
@@ -623,6 +624,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "preimage_hash": self.txn1.preimage_hash,
                     "call_func": self.txn1.call_func,
                     "call_args": self.txn1.call_args,
+                    "submitter": None,
                     "approvals": [
                         {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
                     ],
@@ -649,6 +651,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "preimage_hash": self.txn2.preimage_hash,
                     "call_func": self.txn2.call_func,
                     "call_args": self.txn2.call_args,
+                    "submitter": None,
                     "approvals": [
                         {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
                         {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
@@ -688,6 +691,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "preimage_hash": self.txn1.preimage_hash,
                     "call_func": self.txn1.call_func,
                     "call_args": self.txn1.call_args,
+                    "submitter": None,
                     "approvals": [
                         {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
                     ],
@@ -729,6 +733,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
                     "preimage_hash": self.txn1.preimage_hash,
                     "call_func": self.txn1.call_func,
                     "call_args": self.txn1.call_args,
+                    "submitter": None,
                     "approvals": [
                         {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
                     ],
@@ -788,6 +793,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
             "preimage_hash": "hash3",
             "call_func": "call_func3",
             "call_args": ["call_arg3"],
+            "submitter": None,
             "approvals": [],
             "rejections": [],
             "status": models.TransactionStatus.PENDING,
@@ -860,24 +866,24 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         self.assertDictEqual(res.json(), expected_res)
         self.assertModelsEqual(models.MultiCliqueTransaction.objects.all(), [self.txn1, self.txn2])
 
-    @patch("core.soroban.soroban_service.authorize_transaction")
     @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.Keypair.from_public_key")
+    @patch("core.soroban.soroban_service.authorize_transaction")
     @patch("core.soroban.soroban_service.create_signature_data")
     def test_multiclique_transaction_patch_executable(
-        self, authorize_transaction_mock, prepare_transaction_mock, create_signature_data_mock
+        self, create_signature_data_mock, authorize_transaction_mock, kb_from_pb_mock, prepare_transaction_mock
     ):
-        envelope_1 = Mock()
-        envelope_2 = Mock()
-        envelope_2.to_xdr.return_value = "new_xdr"
+        envelope = Mock()
+        envelope.to_xdr.return_value = "new_xdr"
         create_signature_data_mock.return_value = {"signature": "data"}
-        authorize_transaction_mock.return_value = envelope_1
-        prepare_transaction_mock.return_value = envelope_2
+        prepare_transaction_mock.return_value = envelope
         expected_res = {
             "id": self.txn1.id,
             "xdr": "new_xdr",
             "preimage_hash": self.txn1.preimage_hash,
             "call_func": self.txn1.call_func,
             "call_args": self.txn1.call_args,
+            "submitter": None,
             "approvals": [
                 {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
                 {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
@@ -941,25 +947,257 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         )
         self.assertModelsEqual(self.txn1.approvals.all(), [self.sig1, self.sig3, self.sig4])
         self.assertModelsEqual(self.txn1.rejections.all(), [self.sig2])
+        kb_from_pb_mock.assert_not_called()
+        self.assertModelsEqual(create_signature_data_mock.mock_calls[0].kwargs["signatures"], self.txn1.approvals.all())
+        authorize_transaction_mock.assert_called_once_with(
+            obj="xdr1", signature_data=create_signature_data_mock(), nonce=self.txn1.nonce, ledger=self.txn1.ledger
+        )
+        prepare_transaction_mock.assert_called_once_with(envelope=authorize_transaction_mock(), keypair=None)
 
-    @patch("core.soroban.soroban_service.authorize_transaction")
     @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.Keypair.from_public_key")
+    @patch("core.soroban.soroban_service.authorize_transaction")
+    @patch("core.soroban.soroban_service.create_signature_data")
+    def test_multiclique_transaction_patch_add_submitter(
+        self, create_signature_data_mock, authorize_transaction_mock, kb_from_pb_mock, prepare_transaction_mock
+    ):
+        envelope = Mock()
+        envelope.to_xdr.return_value = "new_xdr"
+        create_signature_data_mock.return_value = {"signature": "data"}
+        prepare_transaction_mock.return_value = envelope
+        txn3 = models.MultiCliqueTransaction.objects.create(
+            multiclique_account=self.mc1,
+            xdr="xdr3",
+            preimage_hash="hash3",
+            call_func="func3",
+            call_args=["arg3"],
+            nonce=3,
+            ledger=3,
+            status=models.TransactionStatus.EXECUTABLE,
+        )
+        txn3.approvals.set([self.sig1, self.sig3, self.sig4])
+        txn3.rejections.set([self.sig2])
+        txn3.save()
+        expected_res = {
+            "id": txn3.id,
+            "xdr": "new_xdr",
+            "preimage_hash": txn3.preimage_hash,
+            "call_func": txn3.call_func,
+            "call_args": txn3.call_args,
+            "submitter": {"address": "pk1", "name": "signer1"},
+            "approvals": [
+                {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+            ],
+            "rejections": [
+                {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+            ],
+            "status": models.TransactionStatus.EXECUTABLE,
+            "executed_at": self.fmt_dt(txn3.executed_at),
+            "created_at": self.fmt_dt(txn3.created_at),
+            "multiclique_address": self.mc1.address,
+            "default_threshold": self.mc1.default_threshold,
+            "signatories": [
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
+            ],
+        }
+
+        with self.assertNumQueries(25):
+            res = self.client.patch(
+                reverse("multiclique-transactions-detail", kwargs={"pk": txn3.id}),
+                data={"submitter": {"address": "pk1", "name": "signer1"}},
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        txn3.refresh_from_db()
+        expected_res.update({"updated_at": self.fmt_dt(txn3.updated_at)})
+        self.assertDictEqual(res.json(), expected_res)
+        self.assertModelsEqual(
+            models.MultiCliqueTransaction.objects.order_by("xdr"),
+            [txn3, self.txn1, self.txn2],
+            ignore_fields=("approvals", "rejections"),
+        )
+        self.assertEqual(txn3.submitter, self.signer1)
+        self.assertModelsEqual(txn3.approvals.all(), [self.sig1, self.sig3, self.sig4])
+        self.assertModelsEqual(txn3.rejections.all(), [self.sig2])
+        kb_from_pb_mock.assert_called_once_with(self.signer1.address)
+        self.assertModelsEqual(create_signature_data_mock.mock_calls[0].kwargs["signatures"], txn3.approvals.all())
+        authorize_transaction_mock.assert_called_once_with(
+            obj="xdr3", signature_data=create_signature_data_mock(), nonce=txn3.nonce, ledger=txn3.ledger
+        )
+        prepare_transaction_mock.assert_called_once_with(
+            envelope=authorize_transaction_mock(), keypair=kb_from_pb_mock()
+        )
+
+    @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.Keypair.from_public_key")
+    @patch("core.soroban.soroban_service.authorize_transaction")
+    @patch("core.soroban.soroban_service.create_signature_data")
+    def test_multiclique_transaction_patch_submitter_in_approvals(
+        self, create_signature_data_mock, authorize_transaction_mock, kb_from_pb_mock, prepare_transaction_mock
+    ):
+        envelope = Mock()
+        envelope.to_xdr.return_value = "new_xdr"
+        create_signature_data_mock.return_value = {"signature": "data"}
+        prepare_transaction_mock.return_value = envelope
+        expected_res = {
+            "id": self.txn1.id,
+            "xdr": "new_xdr",
+            "preimage_hash": self.txn1.preimage_hash,
+            "call_func": self.txn1.call_func,
+            "call_args": self.txn1.call_args,
+            "submitter": {"address": "pk3", "name": "signer3"},
+            "approvals": [
+                {"signature": "sig1", "signatory": {"address": "pk1", "name": "signer1"}},
+                {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+            ],
+            "rejections": [
+                {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
+            ],
+            "status": models.TransactionStatus.EXECUTABLE,
+            "executed_at": self.fmt_dt(self.txn1.executed_at),
+            "created_at": self.fmt_dt(self.txn1.created_at),
+            "multiclique_address": self.mc1.address,
+            "default_threshold": self.mc1.default_threshold,
+            "signatories": [
+                {"address": "pk1", "name": "signer1"},
+                {"address": "pk2", "name": "signer2"},
+                {"address": "pk3", "name": "signer3"},
+                {"address": "pk4", "name": "signer4"},
+            ],
+        }
+
+        with self.assertNumQueries(27):
+            res = self.client.patch(
+                reverse("multiclique-transactions-detail", kwargs={"pk": self.txn1.id}),
+                data={
+                    "submitter": {"address": "pk3", "name": "signer3"},
+                    "approvals": [
+                        {"signature": "sig3", "signatory": {"address": "pk3", "name": "signer3"}},
+                        {"signature": "sig4", "signatory": {"address": "pk4", "name": "signer4"}},
+                    ],
+                },
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_200_OK, res.json())
+        self.txn1.refresh_from_db()
+        expected_res.update({"updated_at": self.fmt_dt(self.txn1.updated_at)})
+        self.assertDictEqual(res.json(), expected_res)
+        self.assertModelsEqual(
+            models.MultiCliqueTransaction.objects.order_by("xdr"),
+            [
+                models.MultiCliqueTransaction(
+                    **{
+                        "id": self.txn1.id,
+                        "xdr": "new_xdr",
+                        "preimage_hash": self.txn1.preimage_hash,
+                        "call_func": self.txn1.call_func,
+                        "call_args": self.txn1.call_args,
+                        "nonce": self.txn1.nonce,
+                        "ledger": self.txn1.ledger,
+                        "updated_at": self.txn1.updated_at,
+                        "created_at": self.txn1.created_at,
+                        "status": models.TransactionStatus.EXECUTABLE,
+                        "executed_at": None,
+                        "multiclique_account": self.mc1,
+                        "submitter_id": "pk3",
+                    }
+                ),
+                self.txn2,
+            ],
+            ignore_fields=("approvals", "rejections"),
+        )
+        self.assertModelsEqual(self.txn1.approvals.all(), [self.sig1, self.sig3, self.sig4])
+        self.assertModelsEqual(self.txn1.rejections.all(), [self.sig2])
+        kb_from_pb_mock.assert_called_once_with("pk3")
+        self.assertModelsEqual(create_signature_data_mock.mock_calls[0].kwargs["signatures"], self.txn1.approvals.all())
+        authorize_transaction_mock.assert_called_once_with(
+            obj="xdr1", signature_data=create_signature_data_mock(), nonce=self.txn1.nonce, ledger=self.txn1.ledger
+        )
+        prepare_transaction_mock.assert_called_once_with(
+            envelope=authorize_transaction_mock(), keypair=kb_from_pb_mock()
+        )
+
+    @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.Keypair.from_public_key")
+    @patch("core.soroban.soroban_service.authorize_transaction")
+    @patch("core.soroban.soroban_service.create_signature_data")
+    @patch("multiclique.views.slack_logger")
+    def test_multiclique_transaction_patch_add_submitter_invalid(
+        self,
+        slack_logger,
+        create_signature_data_mock,
+        authorize_transaction_mock,
+        kb_from_pb_mock,
+        prepare_transaction_mock,
+    ):
+        txn3 = models.MultiCliqueTransaction.objects.create(
+            multiclique_account=self.mc1,
+            xdr="xdr3",
+            preimage_hash="hash3",
+            call_func="func3",
+            call_args=["arg3"],
+            nonce=3,
+            ledger=3,
+            status=models.TransactionStatus.EXECUTABLE,
+        )
+        txn3.approvals.set([self.sig1, self.sig3, self.sig4])
+        txn3.rejections.set([self.sig2])
+        txn3.save()
+        expected_res = {"submitter": ["submitter did not approve the transaction"]}
+
+        with self.assertNumQueries(8):
+            res = self.client.patch(
+                reverse("multiclique-transactions-detail", kwargs={"pk": txn3.id}),
+                data={"submitter": {"address": "pk2", "name": "signer2"}},
+                content_type="application/json",
+                HTTP_AUTHORIZATION=f"Bearer {str(RefreshToken.for_user(self.mc1).access_token)}",  # type: ignore
+            )
+
+        self.assertEqual(res.status_code, HTTP_400_BAD_REQUEST, res.json())
+        slack_logger.error.assert_not_called()
+        txn3.refresh_from_db()
+        self.assertDictEqual(res.json(), expected_res)
+        self.assertModelsEqual(
+            models.MultiCliqueTransaction.objects.order_by("xdr"),
+            [self.txn1, self.txn2, txn3],
+            ignore_fields=("approvals", "rejections"),
+        )
+        self.assertIsNone(txn3.submitter)
+        self.assertModelsEqual(txn3.approvals.all(), [self.sig1, self.sig3, self.sig4])
+        self.assertModelsEqual(txn3.rejections.all(), [self.sig2])
+        kb_from_pb_mock.assert_not_called()
+        create_signature_data_mock.assert_not_called()
+        authorize_transaction_mock.assert_not_called()
+        prepare_transaction_mock.assert_not_called()
+
+    @patch("core.soroban.soroban_service.prepare_transaction")
+    @patch("core.soroban.Keypair.from_public_key")
+    @patch("core.soroban.soroban_service.authorize_transaction")
     @patch("core.soroban.soroban_service.create_signature_data")
     def test_multiclique_transaction_patch_rejected(
-        self, authorize_transaction_mock, prepare_transaction_mock, create_signature_data_mock
+        self, create_signature_data_mock, authorize_transaction_mock, kb_from_pb_mock, prepare_transaction_mock
     ):
-        envelope_1 = Mock()
-        envelope_2 = Mock()
-        envelope_2.to_xdr.return_value = "new_xdr"
+        envelope = Mock()
+        envelope.to_xdr.return_value = "new_xdr"
         create_signature_data_mock.return_value = {"signature": "data"}
-        authorize_transaction_mock.return_value = envelope_1
-        prepare_transaction_mock.return_value = envelope_2
+        prepare_transaction_mock.return_value = envelope
         expected_res = {
             "id": self.txn1.id,
             "xdr": self.txn1.xdr,
             "preimage_hash": self.txn1.preimage_hash,
             "call_func": self.txn1.call_func,
             "call_args": self.txn1.call_args,
+            "submitter": None,
             "approvals": [
                 {"signature": "sig2", "signatory": {"address": "pk2", "name": "signer2"}},
             ],
@@ -1026,3 +1264,7 @@ class MultiCliqueViewSetTest(IntegrationTestCase):
         )
         self.assertModelsEqual(self.txn1.approvals.all(), [self.sig2])
         self.assertModelsEqual(self.txn1.rejections.all(), [self.sig1, self.sig3, self.sig4])
+        kb_from_pb_mock.assert_not_called()
+        create_signature_data_mock.assert_not_called()
+        authorize_transaction_mock.assert_not_called()
+        prepare_transaction_mock.assert_not_called()

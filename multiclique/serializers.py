@@ -70,7 +70,7 @@ class MultiCliqueSignatorySerializer(ModelSerializer):
 
 class MultiCliqueAccountSerializer(ModelSerializer):
     policy = MultiCliquePolicySerializer(required=False)
-    signatories = MultiCliqueSignatorySerializer(many=True, default=[])
+    signatories = MultiCliqueSignatorySerializer(many=True)
 
     class Meta:
         model = models.MultiCliqueAccount
@@ -109,6 +109,7 @@ class MultiCliqueSignatureSerializer(Serializer):
 class MultiCliqueTransactionSerializer(ModelSerializer):
     multiclique_address = CharField(source="multiclique_account.address", read_only=True)
     default_threshold = IntegerField(source="multiclique_account.default_threshold", read_only=True)
+    submitter = MultiCliqueSignatorySerializer(required=False)
     approvals = MultiCliqueSignatureSerializer(many=True)
     rejections = MultiCliqueSignatureSerializer(many=True)
     signatories = MultiCliqueSignatorySerializer(many=True, source="multiclique_account.signatories", read_only=True)
@@ -121,6 +122,7 @@ class MultiCliqueTransactionSerializer(ModelSerializer):
             "preimage_hash",
             "call_func",
             "call_args",
+            "submitter",
             "approvals",
             "rejections",
             "status",
@@ -131,6 +133,16 @@ class MultiCliqueTransactionSerializer(ModelSerializer):
             "default_threshold",
             "signatories",
         )
+
+    def validate_submitter(self, value):
+        try:
+            sig = self.instance.approvals.get(signatory__address=value.get("address"))
+        except models.MultiCliqueSignature.DoesNotExist:
+            if value in [approval["signatory"] for approval in self.initial_data.get("approvals", [])]:
+                return models.MultiCliqueSignatory(**value)
+
+            raise ValidationError("submitter did not approve the transaction")
+        return sig.signatory
 
     @staticmethod
     def _create_signatures(validated_data):
@@ -211,6 +223,18 @@ class CreateMultiCliqueTransactionSerializer(Serializer):
 class UpdateMultiCliqueTransactionSerializer(Serializer):
     approvals = MultiCliqueSignatureSerializer(many=True, required=False)
     rejections = MultiCliqueSignatureSerializer(many=True, required=False)
+    # todo the JWT token could be redesigned to work w/ signatory addresses instead
+    submitter = MultiCliqueSignatorySerializer(required=False)
+
+    def validate_submitter(self, value):
+        try:
+            sig = self.context["txn"].approvals.get(signatory__address=value.get("address"))
+        except models.MultiCliqueSignature.DoesNotExist:
+            if value in [approval["signatory"] for approval in self.initial_data.get("approvals", [])]:
+                return models.MultiCliqueSignatory(**value)
+
+            raise ValidationError("submitter did not approve the transaction")
+        return sig.signatory
 
 
 class SwaggerMultiCliqueAuthSerializer(Serializer):

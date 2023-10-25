@@ -97,6 +97,7 @@ class MultiCliqueTransaction(TimestampableMixin):
     call_func = CharField(max_length=256, null=True)
     call_args = JSONField(null=True)
     multiclique_account = ForeignKey(MultiCliqueAccount, related_name="transactions", on_delete=CASCADE)
+    submitter = ForeignKey(MultiCliqueSignatory, related_name="submitted_transactions", null=True, on_delete=SET_NULL)
     approvals = ManyToManyField(MultiCliqueSignature, related_name="transaction_approvals")
     rejections = ManyToManyField(MultiCliqueSignature, related_name="transaction_rejections")
     status = CharField(max_length=16, choices=TransactionStatus.as_choices(), default=TransactionStatus.PENDING)

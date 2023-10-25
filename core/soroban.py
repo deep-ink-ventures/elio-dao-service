@@ -265,7 +265,8 @@ def update_transaction(
                 signature_data=soroban_service.create_signature_data(signatures=transaction.approvals.all()),
                 nonce=transaction.nonce,
                 ledger=transaction.ledger,
-            )
+            ),
+            keypair=Keypair.from_public_key(submitter.address) if (submitter := transaction.submitter) else None,
         )
         transaction.xdr = envelope.to_xdr()
         transaction.status = multiclique_models.TransactionStatus.EXECUTABLE
