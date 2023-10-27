@@ -523,7 +523,7 @@ class SorobanService(object):
 
         return unpack_sc(stellar_xdr.TransactionMeta.from_xdr(get_txn_res.result_meta_xdr).v3.soroban_meta.return_value)
 
-    def prepare_transaction(self, envelope: TransactionEnvelope, keypair: Keypair = None, sim_txn=None):
+    def prepare_transaction(self, envelope: TransactionEnvelope, keypair: Keypair = None, sim_txn=None, sign=False):
         if keypair:
             acc = self.soroban.load_account(keypair.public_key)
             envelope.transaction.source = acc.account
@@ -539,7 +539,7 @@ class SorobanService(object):
         envelope.transaction.fee *= 2
         envelope.transaction.soroban_data.refundable_fee.int64 *= 2
         envelope.transaction.soroban_data.resources.instructions.uint32 *= 2
-        if keypair:
+        if keypair and sign:
             envelope.sign(keypair)
         return envelope
 
@@ -722,7 +722,7 @@ class SorobanService(object):
                 sim_txn=sim_txn,
             )
         return self.send_transaction(
-            envelope=self.prepare_transaction(envelope=envelope, keypair=signers[0], sim_txn=sim_txn),
+            envelope=self.prepare_transaction(envelope=envelope, keypair=signers[0], sim_txn=sim_txn, sign=True),
             metadata=metadata,
         )
 

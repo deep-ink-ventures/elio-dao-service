@@ -21,6 +21,10 @@ class MultiCliqueEventHandler:
             ("SIGNER", "removed"): self._rm_signer,
             ("POLICY", "added"): self._add_policy,
             ("POLICY", "removed"): self._rm_policy,
+            # todo test and enable these once "outside footprint" bug is fixed
+            # ("POLICY", "lmt_set"): self._set_spend_limit,
+            # ("POLICY", "lmt_reset"): self._reset_spend_limit,
+            # ("POLICY", "spent_upd"): self._already_spent_update,
         }
 
     @staticmethod
@@ -280,7 +284,101 @@ class MultiCliqueEventHandler:
                 )
             ).delete()
             # update transactions
-            self._update_transactions("detach_policy", [{acc_addr: ctx} for acc_addr, ctx in acc_addr_to_ctx.items()])
+            self._update_transactions("detach_policy", [{acc_addr: [ctx]} for acc_addr, ctx in acc_addr_to_ctx.items()])
+
+    def _set_spend_limit(self, event_data: dict[list[dict]], **_):
+        """
+        Args:
+            event_data: event input values by contract_id
+
+        sets spend limits for MultiCliqueContracts
+        """
+
+        data = {}  # (pol_addr, ctr_addr): (spend_limit, mc_addr)
+        for contract_id, events in event_data.items():
+            for event in events:
+                data[(contract_id, event["contract_address"])] = (
+                    event["spend_limit"],
+                    event["multiclique_address"],
+                )
+
+        if data:
+            # update contracts
+            ctrs_to_update = []
+            for m2m in models.MultiCliqueContract.policies.through.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [
+                        Q(multicliquepolicy_id=pol_addr, multicliquecontract_id=ctr_addr)
+                        for pol_addr, ctr_addr in data.keys()
+                    ],
+                )
+            ).select_related("multicliquecontract"):
+                m2m.contract.limit, _ = data[(m2m.multicliquepolicy_id, m2m.multicliquecontract_id)]
+                ctrs_to_update.append(m2m.contract)
+            models.MultiCliqueContract.objects.bulk_create(ctrs_to_update, update_fields=["limit"])
+            # update transactions
+            self._update_transactions(
+                "set_spend_limit",
+                [{mc_addr: [ctr_addr, spend_limit]} for (_, ctr_addr), (spend_limit, mc_addr) in data.items()],
+            )
+
+    def _reset_spend_limit(self, event_data: dict[list[dict]], **_):
+        """
+        Args:
+            event_data: event input values by contract_id
+
+        resets spend limits for MultiCliqueContracts
+        """
+
+        data = {}  # (pol_addr, ctr_addr): mc_addr
+        for contract_id, events in event_data.items():
+            for event in events:
+                data[(contract_id, event["contract_address"])] = event["multiclique_address"]
+
+        if data:
+            # update contracts
+            models.MultiCliqueContract.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [Q(policies__address=pol_addr, address=ctr_addr) for pol_addr, ctr_addr in data.keys()],
+                )
+            ).update(limit=0)
+            # update transactions
+            self._update_transactions(
+                "reset_spend_limit",
+                [{mc_addr: [ctr_addr]} for (_, ctr_addr), mc_addr in data.items()],
+            )
+
+    @staticmethod
+    def _already_spent_update(event_data: dict[list[dict]], **_):
+        """
+        Args:
+            event_data: event input values by contract_id
+
+        updates already_spent for MultiCliqueContracts
+        """
+        data = {}  # (pol_addr, ctr_addr): already_spent
+        for contract_id, events in event_data.items():
+            for event in events:
+                data[(contract_id, event["contract_address"])] = event["already_spent"]
+
+        if data:
+            # update contracts
+            ctrs_to_update = []
+            for m2m in models.MultiCliqueContract.policies.through.objects.filter(
+                reduce(
+                    Q.__or__,
+                    [
+                        Q(multicliquepolicy_id=pol_addr, multicliquecontract_id=ctr_addr)
+                        for pol_addr, ctr_addr in data.keys()
+                    ],
+                )
+            ).select_related("multicliquecontract"):
+                m2m.contract.already_spent = data[(m2m.multicliquepolicy_id, m2m.multicliquecontract_id)]
+                ctrs_to_update.append(m2m.contract)
+            models.MultiCliqueContract.objects.bulk_create(ctrs_to_update, update_fields=["already_spent"])
+            # no transactions to update
 
 
 multiclique_event_handler = MultiCliqueEventHandler()
