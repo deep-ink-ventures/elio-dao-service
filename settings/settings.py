@@ -57,6 +57,14 @@ MIDDLEWARE = [
 CORS_ORIGIN_ALLOW_ALL = True
 CORS_ALLOW_HEADERS = list(default_headers) + ["signature", "block-number", "block-hash"]
 CORS_EXPOSE_HEADERS = ["signature", "block-number", "block-hash"]
+CORS_ALLOW_METHODS = (
+    "DELETE",
+    "GET",
+    "OPTIONS",
+    "PATCH",
+    "POST",
+    "PUT",
+)
 ROOT_URLCONF = "service.urls"
 WSGI_APPLICATION = "service.wsgi.application"
 ASGI_APPLICATION = "service.asgi.application"
